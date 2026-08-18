@@ -1,0 +1,49 @@
+{
+  "name": "omp-agy-native-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OMP provider and optional delegate tool backed by the official Google Antigravity agy CLI; OMP retains native tools and task subagents.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.3.14"
+  },
+  "omp": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-ai": "*",
+    "@oh-my-pi/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.0"
+  },
+  "scripts": {
+    "install-agent": "node --experimental-strip-types ./scripts/install-agent.ts",
+    "doctor": "node --experimental-strip-types ./scripts/doctor.ts",
+    "doctor:live": "node --experimental-strip-types ./scripts/doctor.ts --live",
+    "test": "node --experimental-strip-types --test ./test/*.test.ts",
+    "check:source": "node ./scripts/check.mjs",
+    "check": "npm run check:source && npm test",
+    "typecheck": "tsc --noEmit"
+  },
+  "files": [
+    "src",
+    "agents",
+    "scripts",
+    "examples",
+    "docs",
+    "README.md",
+    "IMPLEMENTATION_INSTRUCTIONS.md",
+    "GPT_SPARK_EXECUTION_PROMPT.md",
+    "ARCHITECTURE.md",
+    "SECURITY.md",
+    "TROUBLESHOOTING.md",
+    "VALIDATION.md",
+    "LICENSE"
+  ]
+}

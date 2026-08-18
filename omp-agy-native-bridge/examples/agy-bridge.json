@@ -1,0 +1,17 @@
+{
+  "providerId": "official-agy",
+  "agyBinary": "agy",
+  "agentName": "omp-bridge-model",
+  "printTimeout": "15m",
+  "hardTimeoutMs": 960000,
+  "sandbox": true,
+  "maxConcurrent": 3,
+  "maxPromptBytes": 1500000,
+  "sanitizeAccountEnvironment": true,
+  "rejectAgyToolUseInProviderMode": true,
+  "enableDelegateTool": true,
+  "discoverModels": true,
+  "includeNonGeminiModels": false,
+  "discoveredContextWindow": 1000000,
+  "discoveredMaxTokens": 64000
+}

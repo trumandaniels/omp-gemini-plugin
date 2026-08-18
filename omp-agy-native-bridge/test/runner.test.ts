@@ -1,0 +1,111 @@
+import assert from "node:assert/strict";
+import { chmod } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+import { runAgy } from "../src/agy/runner.ts";
+
+const fakeAgy = fileURLToPath(new URL("./fixtures/fake-agy", import.meta.url));
+
+await chmod(fakeAgy, 0o755);
+
+test("runAgy parses official stream-json shape", async () => {
+  const result = await runAgy({
+    prompt: "hello",
+    cwd: process.cwd(),
+    binary: fakeAgy,
+    model: "fake-model",
+    effort: "high",
+    agent: "omp-bridge-model",
+    printTimeout: "1m",
+    hardTimeoutMs: 10_000,
+    sandbox: true,
+    maxPromptBytes: 100_000,
+    maxStderrBytes: 10_000,
+    killGraceMs: 100,
+    sanitizeAccountEnvironment: true,
+    schema: { type: "object" },
+  });
+  assert.equal(result.terminal.status, "SUCCESS");
+  assert.deepEqual(result.terminal.structured_output, {
+    text: "ok",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  assert.equal(result.toolSteps.length, 0);
+});
+
+test("runAgy refuses oversized argv prompts", async () => {
+  await assert.rejects(
+    runAgy({
+      prompt: "x".repeat(101),
+      cwd: process.cwd(),
+      binary: fakeAgy,
+      printTimeout: "1m",
+      hardTimeoutMs: 10_000,
+      sandbox: true,
+      maxPromptBytes: 100,
+      maxStderrBytes: 10_000,
+      killGraceMs: 100,
+      sanitizeAccountEnvironment: true,
+    }),
+    /above AGY_BRIDGE_MAX_PROMPT_BYTES/,
+  );
+});
+
+test("runAgy captures nested Antigravity tool and subagent metadata", async () => {
+  const result = await runAgy({
+    prompt: "FAKE:TOOL",
+    cwd: process.cwd(),
+    binary: fakeAgy,
+    printTimeout: "1m",
+    hardTimeoutMs: 10_000,
+    sandbox: true,
+    maxPromptBytes: 100_000,
+    maxStderrBytes: 10_000,
+    killGraceMs: 100,
+    sanitizeAccountEnvironment: true,
+  });
+  assert.equal(result.toolSteps.length, 1);
+  assert.equal(result.subagents.length, 1);
+  assert.equal(result.subagents[0]?.role, "reviewer");
+});
+
+test("runAgy terminates the child when an event callback fails", async () => {
+  await assert.rejects(
+    runAgy({
+      prompt: "hello",
+      cwd: process.cwd(),
+      binary: fakeAgy,
+      printTimeout: "1m",
+      hardTimeoutMs: 10_000,
+      sandbox: true,
+      maxPromptBytes: 100_000,
+      maxStderrBytes: 10_000,
+      killGraceMs: 100,
+      sanitizeAccountEnvironment: true,
+      onEvent: () => {
+        throw new Error("renderer disconnected");
+      },
+    }),
+    /event callback failed: renderer disconnected/,
+  );
+});
+
+test("runAgy rejects non-success terminal status", async () => {
+  await assert.rejects(
+    runAgy({
+      prompt: "FAKE:ERROR",
+      cwd: process.cwd(),
+      binary: fakeAgy,
+      printTimeout: "1m",
+      hardTimeoutMs: 10_000,
+      sandbox: true,
+      maxPromptBytes: 100_000,
+      maxStderrBytes: 10_000,
+      killGraceMs: 100,
+      sanitizeAccountEnvironment: true,
+    }),
+    /agy failed: fake failure/,
+  );
+});

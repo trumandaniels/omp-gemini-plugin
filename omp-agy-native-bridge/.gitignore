@@ -1,0 +1,5 @@
+node_modules/
+.omp/agy-bridge.json
+coverage/
+dist/
+*.log
