@@ -47,6 +47,11 @@ test("provider prompt answers named OMP subagent questions without AGY control t
             },
           },
         },
+        {
+          name: "hub",
+          description: "OMP agent coordination",
+          parameters: { type: "object" },
+        },
       ],
     },
     DEFAULT_CONFIG,
@@ -64,10 +69,11 @@ test("provider prompt answers named OMP subagent questions without AGY control t
     "define_subagent",
     "invoke_subagent",
     "send_message",
-    "hub",
   ]) {
     assert.match(result.prompt, new RegExp(`\\b${tool}\\b`));
   }
+  assert.match(result.prompt, /An OMP tool may have a similar coordination name such as "hub"/);
+  assert.match(result.prompt, /"name": "hub"/);
   assert.match(result.prompt, /If that schema exposes a "name" field/);
   assert.match(result.prompt, /"name": \{/);
 });
