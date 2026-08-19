@@ -151,6 +151,12 @@ export interface AgyRunResult {
   signalCode: NodeJS.Signals | null;
   toolSteps: AgyStepUpdateEvent[];
   subagents: NonNullable<AgySubagentInfo["subagents"]>;
+  /** Total events observed before snapshot caps; omitted by older/fabricated results. */
+  eventCount?: number;
+  /** Total AGY tool lifecycle updates observed before snapshot caps. */
+  toolStepCount?: number;
+  /** Total AGY subagent records observed before snapshot caps. */
+  subagentCount?: number;
 }
 
 export interface BridgeToolCall {
