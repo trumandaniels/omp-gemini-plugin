@@ -65,15 +65,61 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   assert.match(result.prompt, /"name": \{/);
 });
 
-test("provider retry correction discards AGY list probes and insists on OMP semantics", () => {
+test("provider prompt treats structured output as the only return channel after an OMP tool result", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["Inspect global OMP configuration accurately."],
+      messages: [
+        {
+          role: "user",
+          content: "what agents do I already have globally?",
+          timestamp: 1,
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "glob",
+              arguments: { path: "/home/test/.omp/**/*" },
+            },
+          ],
+          stopReason: "toolUse",
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: "glob",
+          content: [{ type: "text", text: "/home/test/.omp/agent/config.yml" }],
+        },
+      ],
+      tools: [],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /After OMP supplies a tool result/);
+  assert.match(result.prompt, /Do not report back through an Antigravity message tool/);
+  assert.match(result.prompt, /OMP is not an Antigravity agent or message recipient/);
+  assert.match(result.prompt, /Never call send_message or manage_inbox with recipient\/to "omp"/);
+  assert.match(result.prompt, /terminal structured response is the return channel to OMP/);
+  assert.match(result.prompt, /what agents do I already have globally\?/);
+  assert.match(result.prompt, /\/home\/test\/\.omp\/agent\/config\.yml/);
+});
+
+test("provider retry correction discards AGY probes and insists on structured return", () => {
   const corrected = appendProviderHarnessRetryInstruction(
     "ORIGINAL PROMPT",
-    ["manage_task", "manage_subagents", "manage_task"],
+    ["send_message", "manage_task", "send_message"],
   );
   assert.match(corrected, /^ORIGINAL PROMPT/);
-  assert.match(corrected, /manage_subagents, manage_task/);
+  assert.match(corrected, /manage_task, send_message/);
   assert.match(corrected, /previous attempt was discarded/i);
   assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
+  assert.match(corrected, /OMP is not an Antigravity message recipient/);
+  assert.match(corrected, /Never call send_message or manage_inbox with recipient\/to "omp"/);
+  assert.match(corrected, /Put the answer in the outer "text" field/);
   assert.match(corrected, /informational OMP question, answer directly with no tool call/);
   assert.match(corrected, /return only an OMP "task" tool call/);
 });
