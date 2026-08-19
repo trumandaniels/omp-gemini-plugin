@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
 
+import { buildAgyEnvironment } from "./env.ts";
 import type { AgyEffort, BridgeConfig, BridgeModelDefinition } from "./types.ts";
 
 const ANSI_ESCAPE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const MODEL_TOKEN = /(?:^|[\s|•>*-])((?:gemini|claude|gpt-oss)[A-Za-z0-9._:/+-]*)/g;
+const MODEL_ID = /^(?:gemini|claude|gpt-oss)[A-Za-z0-9._:/+-]*$/;
 
 export interface ModelDiscoveryResult {
   ok: boolean;
@@ -94,56 +96,124 @@ function mergeModel(
   }
 }
 
+function addModelId(found: string[], seen: Set<string>, value: unknown): void {
+  if (typeof value !== "string") return;
+  const id = value.trim().replace(/[,*]$/, "");
+  if (!MODEL_ID.test(id) || seen.has(id)) return;
+  seen.add(id);
+  found.push(id);
+}
+
+function collectJsonModelIds(value: unknown, found: string[], seen: Set<string>, depth = 0): void {
+  if (depth > 16 || value === null || value === undefined) return;
+  if (typeof value === "string") {
+    addModelId(found, seen, value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectJsonModelIds(item, found, seen, depth + 1);
+    return;
+  }
+  if (typeof value !== "object") return;
+
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    // Some AGY versions return a map keyed by model slug; others return an
+    // array of objects with id/model/slug fields. Support both without treating
+    // arbitrary descriptive strings as model identifiers.
+    addModelId(found, seen, key);
+    if (["id", "model", "modelId", "model_id", "slug", "name"].includes(key)) {
+      addModelId(found, seen, child);
+    }
+    if (["models", "items", "data", "availableModels", "available_models", "result"].includes(key)) {
+      collectJsonModelIds(child, found, seen, depth + 1);
+    }
+  }
+}
+
 export function parseAgyModelsOutput(stdout: string): string[] {
-  const clean = stdout.replace(ANSI_ESCAPE, "");
+  const clean = stdout.replace(ANSI_ESCAPE, "").trim();
   const found: string[] = [];
   const seen = new Set<string>();
+
+  if (clean.startsWith("{") || clean.startsWith("[")) {
+    try {
+      collectJsonModelIds(JSON.parse(clean), found, seen);
+      if (found.length > 0) return found;
+    } catch {
+      // Fall back to the stable table parser for older/mixed CLI output.
+    }
+  }
+
   for (const line of clean.split(/\r?\n/)) {
     MODEL_TOKEN.lastIndex = 0;
     let match: RegExpExecArray | null;
     while ((match = MODEL_TOKEN.exec(line)) !== null) {
-      const slug = match[1].replace(/[,*]$/, "");
-      if (!seen.has(slug)) {
-        seen.add(slug);
-        found.push(slug);
-      }
+      addModelId(found, seen, match[1]);
     }
   }
   return found;
 }
 
-export function discoverAgyModelsSync(
-  config: Pick<BridgeConfig, "agyBinary">,
-  cwd = process.cwd(),
-  timeoutMs = 10_000,
-): ModelDiscoveryResult {
-  const result = spawnSync(config.agyBinary, ["models"], {
+interface DiscoveryCommandResult {
+  stdout: string;
+  stderr: string;
+  status: number | null;
+  error?: string;
+}
+
+function runModelsCommand(
+  config: Pick<BridgeConfig, "agyBinary"> & Partial<Pick<BridgeConfig, "sanitizeAccountEnvironment">>,
+  args: string[],
+  cwd: string,
+  timeoutMs: number,
+): DiscoveryCommandResult {
+  const result = spawnSync(config.agyBinary, args, {
     cwd,
+    env: buildAgyEnvironment(config.sanitizeAccountEnvironment ?? true),
     encoding: "utf8",
     timeout: timeoutMs,
     windowsHide: true,
     shell: false,
     maxBuffer: 4 * 1024 * 1024,
   });
-  const stdout = result.stdout || "";
-  const stderr = result.stderr || "";
-  if (result.error || result.status !== 0) {
+  return {
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+    status: result.status,
+    error: result.error?.message,
+  };
+}
+
+export function discoverAgyModelsSync(
+  config: Pick<BridgeConfig, "agyBinary"> & Partial<Pick<BridgeConfig, "sanitizeAccountEnvironment">>,
+  cwd = process.cwd(),
+  timeoutMs = 10_000,
+): ModelDiscoveryResult {
+  const machine = runModelsCommand(config, ["models", "--output-format", "json"], cwd, timeoutMs);
+  const machineModels = machine.status === 0 && !machine.error
+    ? parseAgyModelsOutput(machine.stdout)
+    : [];
+  if (machineModels.length > 0) {
+    return { ok: true, models: machineModels, ...machine };
+  }
+
+  // AGY before machine-readable model listing, and future versions whose JSON
+  // shape we do not yet recognize, still have the human-readable `agy models`
+  // command. Keep that as a compatibility fallback.
+  const plain = runModelsCommand(config, ["models"], cwd, timeoutMs);
+  const models = plain.status === 0 && !plain.error ? parseAgyModelsOutput(plain.stdout) : [];
+  if (models.length === 0) {
+    const diagnostics = [machine.stderr.trim(), plain.stderr.trim()].filter(Boolean).join("\n");
     return {
       ok: false,
       models: [],
-      stdout,
-      stderr,
-      status: result.status,
-      error: result.error?.message,
+      stdout: plain.stdout || machine.stdout,
+      stderr: diagnostics,
+      status: plain.status ?? machine.status,
+      error: plain.error ?? machine.error ?? (plain.status === 0 ? "agy models returned no recognized model slugs" : undefined),
     };
   }
-  return {
-    ok: true,
-    models: parseAgyModelsOutput(stdout),
-    stdout,
-    stderr,
-    status: result.status,
-  };
+  return { ok: true, models, ...plain };
 }
 
 export function mergeDiscoveredModels(

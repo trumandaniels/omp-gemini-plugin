@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
+import { chmod } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { DEFAULT_CONFIG, DEFAULT_MODELS } from "../src/config.ts";
-import { mergeDiscoveredModels, parseAgyModelsOutput } from "../src/model-discovery.ts";
+import {
+  discoverAgyModelsSync,
+  mergeDiscoveredModels,
+  parseAgyModelsOutput,
+} from "../src/model-discovery.ts";
+
+const fakeAgyModels = fileURLToPath(new URL("./fixtures/fake-agy-models", import.meta.url));
+await chmod(fakeAgyModels, 0o755);
 
 test("parseAgyModelsOutput extracts current model slugs from table-like output", () => {
   const output = `Available models
@@ -16,6 +25,77 @@ MODEL                         DESCRIPTION
     "gemini-3.7-flash-medium",
     "claude-sonnet-4-6",
   ]);
+});
+
+test("parseAgyModelsOutput accepts machine-readable arrays and slug-keyed maps", () => {
+  assert.deepEqual(
+    parseAgyModelsOutput(
+      JSON.stringify({
+        models: [
+          { id: "gemini-3.7-flash-low", displayName: "Gemini Flash Low" },
+          { model: "gemini-3.7-flash-high" },
+          { slug: "claude-sonnet-4-6" },
+        ],
+      }),
+    ),
+    ["gemini-3.7-flash-low", "gemini-3.7-flash-high", "claude-sonnet-4-6"],
+  );
+
+  assert.deepEqual(
+    parseAgyModelsOutput(
+      JSON.stringify({
+        data: {
+          "gemini-3.1-pro-low": { description: "Low" },
+          "gemini-3.1-pro-high": { description: "High" },
+        },
+      }),
+    ),
+    ["gemini-3.1-pro-low", "gemini-3.1-pro-high"],
+  );
+});
+
+test("parseAgyModelsOutput ignores descriptive JSON strings that are not model IDs", () => {
+  assert.deepEqual(
+    parseAgyModelsOutput(
+      JSON.stringify({
+        models: [{ id: "gemini-3.7-flash-high", description: "gemini is a model family" }],
+        note: "claude-sonnet is unavailable",
+      }),
+    ),
+    ["gemini-3.7-flash-high"],
+  );
+});
+
+test("discoverAgyModelsSync prefers JSON and sanitizes account-routing secrets", () => {
+  const previous = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = "must-not-leak";
+  try {
+    const result = discoverAgyModelsSync(
+      { agyBinary: fakeAgyModels, sanitizeAccountEnvironment: true },
+      process.cwd(),
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.models, ["gemini-3.7-flash-low", "gemini-3.7-flash-high"]);
+  } finally {
+    if (previous === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = previous;
+  }
+});
+
+test("discoverAgyModelsSync falls back to the table command when JSON listing is unavailable", () => {
+  const previous = process.env.FAKE_AGY_MODELS_JSON_FAIL;
+  process.env.FAKE_AGY_MODELS_JSON_FAIL = "1";
+  try {
+    const result = discoverAgyModelsSync(
+      { agyBinary: fakeAgyModels, sanitizeAccountEnvironment: true },
+      process.cwd(),
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.models, ["gemini-3.1-pro-low", "gemini-3.1-pro-high"]);
+  } finally {
+    if (previous === undefined) delete process.env.FAKE_AGY_MODELS_JSON_FAIL;
+    else process.env.FAKE_AGY_MODELS_JSON_FAIL = previous;
+  }
 });
 
 test("mergeDiscoveredModels collapses raw tier aliases into logical Gemini families", () => {
@@ -128,7 +208,7 @@ test("configured raw Gemini suffix IDs collapse to logical entries", () => {
   assert.equal(models[1]?.agyModelId, undefined);
 });
 
-test("mergeDiscoveredModels keeps the highest-effort metadata when merging configured and discovered", () => {
+test("mergeDiscoveredModels keeps configured metadata while merging discovered tiers", () => {
   const models = mergeDiscoveredModels(
     [
       {

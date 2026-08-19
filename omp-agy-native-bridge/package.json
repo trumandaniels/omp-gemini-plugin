@@ -28,7 +28,8 @@
     "doctor:live": "node --experimental-strip-types ./scripts/doctor.ts --live",
     "test": "node --experimental-strip-types --test ./test/*.test.ts",
     "check:source": "node ./scripts/check.mjs",
-    "check": "npm run check:source && npm test",
+    "check:package": "node ./scripts/check-package.mjs",
+    "check": "npm run check:source && npm test && npm run check:package",
     "typecheck": "tsc --noEmit"
   },
   "files": [

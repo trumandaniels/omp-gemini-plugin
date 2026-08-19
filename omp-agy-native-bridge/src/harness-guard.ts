@@ -3,6 +3,11 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 import type { AgyRunResult, AgyStepUpdateEvent } from "./types.ts";
 
+export type ProviderHarnessActivity = Pick<
+  AgyRunResult,
+  "toolSteps" | "subagents" | "toolStepCount" | "subagentCount"
+>;
+
 function toolStepName(event: AgyStepUpdateEvent): string {
   return event.step_update.tool_info?.name
     ?? event.step_update.tool_name
@@ -142,6 +147,25 @@ export function retryableProviderControlToolNames(
   return [...new Set(unexpected.map(toolStepName))].sort((left, right) => left.localeCompare(right));
 }
 
+function observedToolStepCount(result: ProviderHarnessActivity): number {
+  return result.toolStepCount ?? result.toolSteps.length;
+}
+
+function observedSubagentCount(result: ProviderHarnessActivity): number {
+  return result.subagentCount ?? result.subagents.length;
+}
+
+/** A safety decision is valid only when every observed activity record was retained. */
+export function providerHarnessSnapshotsComplete(result: ProviderHarnessActivity): boolean {
+  return observedToolStepCount(result) === result.toolSteps.length
+    && observedSubagentCount(result) === result.subagents.length;
+}
+
+function snapshotSummary(result: ProviderHarnessActivity): string {
+  return `${observedToolStepCount(result)} tool lifecycle update(s) observed/${result.toolSteps.length} retained, `
+    + `${observedSubagentCount(result)} subagent record(s) observed/${result.subagents.length} retained`;
+}
+
 function activitySummaryFromSteps(
   toolSteps: readonly AgyStepUpdateEvent[],
   lifecycleCount: number,
@@ -167,21 +191,29 @@ function unexpectedToolNames(toolSteps: readonly AgyStepUpdateEvent[]): string {
   return names.length > 0 ? names.join(", ") : "none";
 }
 
-export function providerHarnessActivitySummary(
-  result: Pick<AgyRunResult, "toolSteps" | "subagents">,
-): string {
-  return activitySummaryFromSteps(
+export function providerHarnessActivitySummary(result: ProviderHarnessActivity): string {
+  const summary = activitySummaryFromSteps(
     uniqueAgyToolSteps(result.toolSteps),
-    result.toolSteps.length,
-    result.subagents.length,
+    observedToolStepCount(result),
+    observedSubagentCount(result),
   );
+  return providerHarnessSnapshotsComplete(result)
+    ? summary
+    : `${summary}; activity snapshots incomplete (${snapshotSummary(result)})`;
 }
 
 export function assertProviderHarnessIsToolless(
-  result: Pick<AgyRunResult, "toolSteps" | "subagents">,
+  result: ProviderHarnessActivity,
   agentName: string,
   options: ProviderHarnessGuardOptions = {},
 ): void {
+  if (!providerHarnessSnapshotsComplete(result)) {
+    throw new Error(
+      `AGY provider activity snapshots were truncated (${snapshotSummary(result)}). `
+        + "The bridge cannot safely classify all inner harness activity, so provider mode is failing closed.",
+    );
+  }
+
   const unexpectedTools = unexpectedProviderHarnessToolSteps(result.toolSteps, options);
   if (unexpectedTools.length === 0 && result.subagents.length === 0) return;
   const names = unexpectedToolNames(unexpectedTools);

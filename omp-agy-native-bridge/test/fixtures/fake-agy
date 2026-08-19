@@ -25,7 +25,14 @@ if (prompt.includes("FAKE:CHILD")) {
   continueForever();
 }
 
-const structured = { text: "ok", tool_calls: [], finish_reason: "stop" };
+const correctedMissingRecipient = prompt.includes("no such Antigravity recipient exists");
+const structured = {
+  text: prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && correctedMissingRecipient
+    ? "recovered without AGY messaging"
+    : "ok",
+  tool_calls: [],
+  finish_reason: "stop",
+};
 console.log(
   JSON.stringify({
     event: "init",
@@ -55,6 +62,48 @@ if (prompt.includes("FAKE:TOOL")) {
       },
     }),
   );
+}
+
+if (prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && !correctedMissingRecipient) {
+  for (const state of ["ACTIVE", "DONE"]) {
+    console.log(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "fake-conversation",
+          step_index: 7,
+          state,
+          step_type: "tool",
+          tool_name: "send_message",
+          tool_info: {
+            name: "send_message",
+            parameters: { recipient: "omp", message: "continue" },
+            ...(state === "DONE"
+              ? { error: { type: "not_found", message: 'recipient "omp" not found' } }
+              : {}),
+          },
+        },
+      }),
+    );
+  }
+  console.log(
+    JSON.stringify({
+      event: "result",
+      result: {
+        conversation_id: "fake-conversation",
+        status: "ERROR",
+        error: 'recipient "omp" not found',
+        usage: {
+          input_tokens: 5,
+          output_tokens: 1,
+          thinking_tokens: 1,
+          cache_read_tokens: 0,
+          total_tokens: 7,
+        },
+      },
+    }),
+  );
+  process.exit(1);
 }
 
 if (prompt.includes("FAKE:ERROR")) {
@@ -98,7 +147,7 @@ console.log(
         output_tokens: 4,
         thinking_tokens: 0,
         cache_read_tokens: 2,
-        total_tokens: 14,
+        total_tokens: 16,
       },
     },
   }),

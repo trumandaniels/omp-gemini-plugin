@@ -16,3 +16,18 @@ test("parseAgyEventLine accepts init, update, and result", () => {
 test("parseAgyEventLine rejects unknown event types", () => {
   assert.throws(() => parseAgyEventLine('{"event":"mystery"}'), /Unknown agy NDJSON event/);
 });
+
+test("parseAgyEventLine rejects array-shaped event payloads", () => {
+  assert.throws(
+    () => parseAgyEventLine('{"event":"init","init":[]}'),
+    /object-shaped init payload/,
+  );
+  assert.throws(
+    () => parseAgyEventLine('{"event":"step_update","step_update":[]}'),
+    /object-shaped step_update payload/,
+  );
+  assert.throws(
+    () => parseAgyEventLine('{"event":"result","result":[]}'),
+    /object-shaped result payload/,
+  );
+});

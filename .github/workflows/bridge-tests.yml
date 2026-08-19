@@ -1,0 +1,65 @@
+name: OMP bridge compatibility
+
+on:
+  pull_request:
+    paths:
+      - "omp-agy-native-bridge/**"
+      - ".github/workflows/bridge-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "omp-agy-native-bridge/**"
+      - ".github/workflows/bridge-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: OMP ${{ matrix.omp-version }} / Node 22
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        omp-version: ["17.2.12", "latest"]
+    defaults:
+      run:
+        working-directory: omp-agy-native-bridge
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: omp-agy-native-bridge/package.json
+
+      - name: Install bridge dependencies and OMP peers
+        run: >-
+          npm install --no-audit --no-fund --no-save
+          @oh-my-pi/pi-ai@${{ matrix.omp-version }}
+          @oh-my-pi/pi-coding-agent@${{ matrix.omp-version }}
+
+      - name: Report installed OMP peer versions
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          for (const name of ["@oh-my-pi/pi-ai", "@oh-my-pi/pi-coding-agent"]) {
+            const path = `node_modules/${name}/package.json`;
+            const version = JSON.parse(fs.readFileSync(path, "utf8")).version;
+            console.log(`${name} ${version}`);
+          }
+          NODE
+
+      - name: Syntax-check every TypeScript source
+        run: npm run check:source
+
+      - name: Run unit and fake-process tests
+        run: npm test
+
+      - name: Typecheck against OMP ${{ matrix.omp-version }}
+        run: npm run typecheck
+
+      - name: Verify distributable package contents
+        run: npm run check:package

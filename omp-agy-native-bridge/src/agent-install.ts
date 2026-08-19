@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
+import { assertSafeAgentName } from "./agent-name.ts";
+
 export function globalAgentPath(agentName = "omp-bridge-model"): string {
+  assertSafeAgentName(agentName);
   return join(homedir(), ".gemini", "config", "agents", agentName, "agent.md");
 }
 

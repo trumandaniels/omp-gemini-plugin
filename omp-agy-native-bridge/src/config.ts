@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
+import { assertSafeAgentName } from "./agent-name.ts";
 import type { AgyEffort, BridgeConfig, BridgeModelDefinition } from "./types.ts";
 
 export const DEFAULT_MODELS: BridgeModelDefinition[] = [
@@ -51,7 +52,13 @@ type PartialBridgeConfig = Partial<Omit<BridgeConfig, "models">> & {
 function readJson(path: string): PartialBridgeConfig | undefined {
   if (!existsSync(path)) return undefined;
   const raw = readFileSync(path, "utf8");
-  const parsed = JSON.parse(raw) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not parse bridge config ${path}: ${detail}`);
+  }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`Bridge config must be a JSON object: ${path}`);
   }
@@ -61,8 +68,9 @@ function readJson(path: string): PartialBridgeConfig | undefined {
 function envBoolean(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
-  if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
-  if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
+  const normalized = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
   throw new Error(`${name} must be true/false or 1/0`);
 }
 
@@ -76,10 +84,15 @@ function envInteger(name: string, fallback: number): number {
   return value;
 }
 
+function isAgyEffort(value: unknown): value is AgyEffort {
+  return value === "low" || value === "medium" || value === "high";
+}
+
 function envEffort(name: string, fallback?: AgyEffort): AgyEffort | undefined {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === "") return fallback;
-  if (raw === "low" || raw === "medium" || raw === "high") return raw;
+  const normalized = raw.trim();
+  if (isAgyEffort(normalized)) return normalized;
   throw new Error(`${name} must be low, medium, high, or empty`);
 }
 
@@ -153,6 +166,26 @@ export function validateBridgeConfig(config: BridgeConfig): void {
       throw new Error(`Bridge config ${name} must be a non-empty string`);
     }
   }
+  assertSafeAgentName(config.agentName);
+
+  for (const key of [
+    "sandbox",
+    "sanitizeAccountEnvironment",
+    "rejectAgyToolUseInProviderMode",
+    "enableDelegateTool",
+    "enableImageInput",
+    "discoverModels",
+    "includeNonGeminiModels",
+  ] as const) {
+    if (typeof config[key] !== "boolean") {
+      throw new Error(`Bridge config ${key} must be boolean`);
+    }
+  }
+
+  if (config.defaultEffort !== undefined && !isAgyEffort(config.defaultEffort)) {
+    throw new Error("Bridge config defaultEffort must be low, medium, high, or omitted");
+  }
+
   for (const key of [
     "hardTimeoutMs",
     "maxConcurrent",
@@ -173,16 +206,57 @@ export function validateBridgeConfig(config: BridgeConfig): void {
       throw new Error(`Bridge config ${key} must be a positive integer`);
     }
   }
+
   if (!Array.isArray(config.models) || config.models.length === 0) {
     throw new Error("Bridge config models must contain at least one static model");
   }
   const seen = new Set<string>();
   for (const model of config.models) {
-    if (!model.id || !model.name) throw new Error("Every bridge model needs id and name");
+    if (!model || typeof model !== "object" || Array.isArray(model)) {
+      throw new Error("Every bridge model must be an object");
+    }
+    if (typeof model.id !== "string" || model.id.trim() === "") {
+      throw new Error("Every bridge model needs a non-empty id");
+    }
+    if (typeof model.name !== "string" || model.name.trim() === "") {
+      throw new Error(`Bridge model ${model.id} needs a non-empty name`);
+    }
     if (seen.has(model.id)) throw new Error(`Duplicate bridge model id: ${model.id}`);
     seen.add(model.id);
-    if (model.contextWindow <= 0 || model.maxTokens <= 0) {
-      throw new Error(`Invalid token limits for model ${model.id}`);
+    if (typeof model.reasoning !== "boolean") {
+      throw new Error(`Model ${model.id} reasoning must be boolean`);
+    }
+    if (!Number.isSafeInteger(model.contextWindow) || model.contextWindow <= 0) {
+      throw new Error(`Invalid contextWindow for model ${model.id}`);
+    }
+    if (!Number.isSafeInteger(model.maxTokens) || model.maxTokens <= 0) {
+      throw new Error(`Invalid maxTokens for model ${model.id}`);
+    }
+    if (model.effort !== undefined && !isAgyEffort(model.effort)) {
+      throw new Error(`Model ${model.id} effort must be low, medium, high, or omitted`);
+    }
+    if (model.agyModelId !== undefined && (typeof model.agyModelId !== "string" || model.agyModelId.trim() === "")) {
+      throw new Error(`Model ${model.id} agyModelId must be a non-empty string when supplied`);
+    }
+    if (model.agyModelIdsByEffort !== undefined) {
+      if (!model.agyModelIdsByEffort || typeof model.agyModelIdsByEffort !== "object" || Array.isArray(model.agyModelIdsByEffort)) {
+        throw new Error(`Model ${model.id} agyModelIdsByEffort must be an object when supplied`);
+      }
+      if (model.agyModelId !== undefined) {
+        throw new Error(`Model ${model.id} cannot define both agyModelId and agyModelIdsByEffort`);
+      }
+      const routes = Object.entries(model.agyModelIdsByEffort);
+      if (routes.length === 0) {
+        throw new Error(`Model ${model.id} agyModelIdsByEffort must contain at least one route`);
+      }
+      for (const [effort, route] of routes) {
+        if (!isAgyEffort(effort)) {
+          throw new Error(`Model ${model.id} has unsupported effort route: ${effort}`);
+        }
+        if (typeof route !== "string" || route.trim() === "") {
+          throw new Error(`Model ${model.id} route ${effort} must be a non-empty string`);
+        }
+      }
     }
     if (model.supportsImages !== undefined && typeof model.supportsImages !== "boolean") {
       throw new Error(`Model ${model.id} supportsImages must be boolean when supplied`);
