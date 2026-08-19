@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   assertProviderHarnessIsToolless,
   providerHarnessActivitySummary,
+  providerHarnessSnapshotsComplete,
   retryableProviderControlToolNames,
   unexpectedProviderHarnessToolSteps,
   uniqueAgyToolSteps,
@@ -185,6 +186,35 @@ test("assertProviderHarnessIsToolless rejects subagents even with safe media rea
         { cwd, allowedMediaPaths: [mediaPath] },
       ),
     /1 subagent/,
+  );
+});
+
+test("provider guard fails closed when tool activity snapshots are truncated", () => {
+  const activity = {
+    toolSteps: [toolEvent("DONE", 1, "manage_subagents", { Action: "list" })],
+    toolStepCount: 501,
+    subagents: [],
+    subagentCount: 0,
+  };
+  assert.equal(providerHarnessSnapshotsComplete(activity), false);
+  assert.match(providerHarnessActivitySummary(activity), /snapshots incomplete/);
+  assert.throws(
+    () => assertProviderHarnessIsToolless(activity, "omp-bridge-model"),
+    /activity snapshots were truncated.*failing closed/,
+  );
+});
+
+test("provider guard fails closed when subagent snapshots are truncated", () => {
+  const activity = {
+    toolSteps: [],
+    toolStepCount: 0,
+    subagents: [{ role: "worker" }],
+    subagentCount: 501,
+  };
+  assert.equal(providerHarnessSnapshotsComplete(activity), false);
+  assert.throws(
+    () => assertProviderHarnessIsToolless(activity, "omp-bridge-model"),
+    /501 subagent record\(s\) observed\/1 retained/,
   );
 });
 
