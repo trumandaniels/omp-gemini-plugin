@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -13,7 +14,10 @@ import type { AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
 const fakeAgy = fileURLToPath(new URL("./fixtures/fake-agy", import.meta.url));
 await chmod(fakeAgy, 0o755);
 
-function sendMessageEvent(state: string): AgyStepUpdateEvent {
+function sendMessageEvent(
+  state: string,
+  parameters: Record<string, unknown> = { recipient: "omp", message: "continue" },
+): AgyStepUpdateEvent {
   return {
     event: "step_update",
     step_update: {
@@ -24,8 +28,22 @@ function sendMessageEvent(state: string): AgyStepUpdateEvent {
       tool_name: "send_message",
       tool_info: {
         name: "send_message",
-        parameters: { recipient: "omp", message: "continue" },
+        parameters,
       },
+    },
+  };
+}
+
+function readFileEvent(path: string): AgyStepUpdateEvent {
+  return {
+    event: "step_update",
+    step_update: {
+      conversation_id: "conversation-1",
+      step_index: 6,
+      state: "DONE",
+      step_type: "tool",
+      tool_name: "read_file",
+      tool_info: { name: "read_file", parameters: { path } },
     },
   };
 }
@@ -94,6 +112,46 @@ test("runProviderAttempts recovers the exact missing OMP recipient failure once"
   });
 });
 
+test("missing-recipient classification accepts an exact OMP send with scoped media hydration", () => {
+  const cwd = process.cwd();
+  const mediaPath = resolve(cwd, ".omp-agy-media-test/image-1.png");
+  const error = missingRecipientError({
+    toolSteps: [
+      readFileEvent(mediaPath),
+      sendMessageEvent("ACTIVE"),
+      sendMessageEvent("DONE"),
+    ],
+  });
+
+  assert.equal(
+    isRetryableMissingOmpRecipientError(error, { cwd, allowedMediaPaths: [mediaPath] }),
+    true,
+  );
+});
+
+test("missing-recipient classification accepts an exact terminal failure without a lifecycle event", () => {
+  assert.equal(
+    isRetryableMissingOmpRecipientError(missingRecipientError({ toolSteps: [], toolStepCount: 0 })),
+    true,
+  );
+});
+
+test("missing-recipient classification rejects other, mixed, or unspecified recipients", () => {
+  for (const parameters of [
+    { recipient: "parent", message: "continue" },
+    { to: "main", message: "continue" },
+    { recipients: ["omp", "reviewer"], message: "continue" },
+    { message: "continue" },
+  ]) {
+    assert.equal(
+      isRetryableMissingOmpRecipientError(
+        missingRecipientError({ toolSteps: [sendMessageEvent("DONE", parameters)] }),
+      ),
+      false,
+    );
+  }
+});
+
 test("missing-recipient classification rejects unrelated or incomplete AGY activity", () => {
   assert.equal(isRetryableMissingOmpRecipientError(missingRecipientError()), true);
   assert.equal(
@@ -127,6 +185,30 @@ test("missing-recipient classification rejects unrelated or incomplete AGY activ
     isRetryableMissingOmpRecipientError(missingRecipientError({ subagentCount: 1 })),
     false,
   );
+});
+
+test("runProviderAttempts forwards staged-media guard options to recipient recovery", async () => {
+  const cwd = process.cwd();
+  const mediaPath = resolve(cwd, ".omp-agy-media-test/image-1.png");
+  let calls = 0;
+  const outcome = await runProviderAttempts({
+    initialPrompt: "prompt",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    guardOptions: { cwd, allowedMediaPaths: [mediaPath] },
+    invoke: async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw missingRecipientError({
+          toolSteps: [readFileEvent(mediaPath), sendMessageEvent("DONE")],
+        });
+      }
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.result.terminal.status, "SUCCESS");
 });
 
 test("runProviderAttempts never performs a third AGY attempt", async () => {
