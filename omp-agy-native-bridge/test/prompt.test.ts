@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import { appendProviderHarnessRetryInstruction, buildProviderPrompt } from "../src/prompt.ts";
+import {
+  appendMissingOmpRecipientRetryInstruction,
+  appendProviderHarnessRetryInstruction,
+  buildProviderPrompt,
+} from "../src/prompt.ts";
 
 test("provider prompt tells agy to request OMP task instead of native subagents", () => {
   const result = buildProviderPrompt(
@@ -51,6 +55,8 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   assert.match(result.prompt, /unqualified words such as "agent", "subagent", "named subagent"/);
   assert.match(result.prompt, /For an informational question about OMP subagents, answer directly/);
   assert.match(result.prompt, /how to make named subagents\?/);
+  assert.match(result.prompt, /It is not an Antigravity recipient/);
+  assert.match(result.prompt, /Never send a message to a recipient named "omp"/);
   for (const tool of [
     "manage_task",
     "manage_subagents",
@@ -58,6 +64,7 @@ test("provider prompt answers named OMP subagent questions without AGY control t
     "define_subagent",
     "invoke_subagent",
     "send_message",
+    "hub",
   ]) {
     assert.match(result.prompt, new RegExp(`\\b${tool}\\b`));
   }
@@ -76,6 +83,16 @@ test("provider retry correction discards AGY list probes and insists on OMP sema
   assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
   assert.match(corrected, /informational OMP question, answer directly with no tool call/);
   assert.match(corrected, /return only an OMP "task" tool call/);
+});
+
+test("missing-recipient retry correction treats OMP as the host, not an AGY peer", () => {
+  const corrected = appendMissingOmpRecipientRetryInstruction("ORIGINAL PROMPT");
+  assert.match(corrected, /^ORIGINAL PROMPT/);
+  assert.match(corrected, /recipient named "omp"/);
+  assert.match(corrected, /OMP is the host application and tool dispatcher/);
+  assert.match(corrected, /not an Antigravity agent, inbox, recipient, or conversation peer/);
+  assert.match(corrected, /Do not call send_message/);
+  assert.match(corrected, /return only a valid OMP tool call/);
 });
 
 test("provider prompt maps staged OMP images to AGY prompt-media mentions", () => {
