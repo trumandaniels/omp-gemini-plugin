@@ -66,7 +66,7 @@ test("parseAgyModelsOutput ignores descriptive JSON strings that are not model I
   );
 });
 
-test("discoverAgyModelsSync prefers JSON and sanitizes account-routing secrets", () => {
+test("discoverAgyModelsSync prefers the plain listing and sanitizes account-routing secrets", () => {
   const previous = process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY = "must-not-leak";
   try {
@@ -75,26 +75,45 @@ test("discoverAgyModelsSync prefers JSON and sanitizes account-routing secrets",
       process.cwd(),
     );
     assert.equal(result.ok, true);
-    assert.deepEqual(result.models, ["gemini-3.7-flash-low", "gemini-3.7-flash-high"]);
+    assert.deepEqual(result.models, ["gemini-3.1-pro-low", "gemini-3.1-pro-high"]);
   } finally {
     if (previous === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = previous;
   }
 });
 
-test("discoverAgyModelsSync falls back to the table command when JSON listing is unavailable", () => {
-  const previous = process.env.FAKE_AGY_MODELS_JSON_FAIL;
-  process.env.FAKE_AGY_MODELS_JSON_FAIL = "1";
+test("discoverAgyModelsSync falls back to JSON only when plain output is unrecognized", () => {
+  const previous = process.env.FAKE_AGY_MODELS_PLAIN_EMPTY;
+  process.env.FAKE_AGY_MODELS_PLAIN_EMPTY = "1";
   try {
     const result = discoverAgyModelsSync(
       { agyBinary: fakeAgyModels, sanitizeAccountEnvironment: true },
       process.cwd(),
     );
     assert.equal(result.ok, true);
-    assert.deepEqual(result.models, ["gemini-3.1-pro-low", "gemini-3.1-pro-high"]);
+    assert.deepEqual(result.models, ["gemini-3.7-flash-low", "gemini-3.7-flash-high"]);
   } finally {
-    if (previous === undefined) delete process.env.FAKE_AGY_MODELS_JSON_FAIL;
-    else process.env.FAKE_AGY_MODELS_JSON_FAIL = previous;
+    if (previous === undefined) delete process.env.FAKE_AGY_MODELS_PLAIN_EMPTY;
+    else process.env.FAKE_AGY_MODELS_PLAIN_EMPTY = previous;
+  }
+});
+
+test("discoverAgyModelsSync preserves a plain transport failure without probing another format", () => {
+  const previous = process.env.FAKE_AGY_MODELS_PLAIN_FAIL;
+  process.env.FAKE_AGY_MODELS_PLAIN_FAIL = "1";
+  try {
+    const result = discoverAgyModelsSync(
+      { agyBinary: fakeAgyModels, sanitizeAccountEnvironment: true },
+      process.cwd(),
+    );
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.models, []);
+    assert.equal(result.status, 4);
+    assert.match(result.stderr, /loadCodeAssist/);
+    assert.match(result.stderr, /x509: certificate signed by unknown authority/);
+  } finally {
+    if (previous === undefined) delete process.env.FAKE_AGY_MODELS_PLAIN_FAIL;
+    else process.env.FAKE_AGY_MODELS_PLAIN_FAIL = previous;
   }
 });
 
