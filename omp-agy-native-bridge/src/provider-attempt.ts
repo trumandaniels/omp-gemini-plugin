@@ -31,7 +31,8 @@ function toolStepName(result: AgyRunResult["toolSteps"][number]): string {
 export function isRetryableMissingOmpRecipientError(error: unknown): error is AgyRunError {
   if (!(error instanceof AgyRunError)) return false;
   if (error.terminal?.status !== "ERROR") return false;
-  if (!MISSING_OMP_RECIPIENT.test(error.terminal.error?.trim() ?? "")) return false;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string" || !MISSING_OMP_RECIPIENT.test(terminalError.trim())) return false;
   if (error.subagents.length > 0) return false;
 
   const tools = uniqueAgyToolSteps(error.toolSteps);
