@@ -7,6 +7,7 @@ import test from "node:test";
 import { AgyRunError, runAgy, type AgyRunErrorDetails } from "../src/agy/runner.ts";
 import {
   isRetryableMissingOmpRecipientError,
+  retryableMissingAgyRecipient,
   runProviderAttempts,
 } from "../src/provider-attempt.ts";
 import type { AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
@@ -48,16 +49,23 @@ function readFileEvent(path: string): AgyStepUpdateEvent {
   };
 }
 
-function missingRecipientError(overrides: Partial<AgyRunErrorDetails> = {}): AgyRunError {
-  return new AgyRunError('agy failed: recipient "omp" not found', {
+function missingRecipientError(
+  overrides: Partial<AgyRunErrorDetails> = {},
+  recipient = "omp",
+): AgyRunError {
+  const message = `recipient "${recipient}" not found`;
+  return new AgyRunError(`agy failed: ${message}`, {
     exitCode: 1,
     status: "ERROR",
     terminal: {
       status: "ERROR",
-      error: 'recipient "omp" not found',
+      error: message,
       usage: { input_tokens: 5, output_tokens: 1, thinking_tokens: 1, total_tokens: 7 },
     },
-    toolSteps: [sendMessageEvent("ACTIVE"), sendMessageEvent("DONE")],
+    toolSteps: [
+      sendMessageEvent("ACTIVE", { recipient, message: "continue" }),
+      sendMessageEvent("DONE", { recipient, message: "continue" }),
+    ],
     subagents: [],
     ...overrides,
   });
@@ -136,6 +144,37 @@ test("missing-recipient classification accepts an exact terminal failure without
   );
 });
 
+test("generic missing-recipient recovery accepts OMP tool names such as read", () => {
+  assert.equal(retryableMissingAgyRecipient(missingRecipientError({}, "read")), "read");
+  assert.equal(
+    retryableMissingAgyRecipient(
+      missingRecipientError({ toolSteps: [], toolStepCount: 0 }, "glob"),
+    ),
+    "glob",
+  );
+});
+
+test("generic missing-recipient recovery requires lifecycle recipients to match the terminal error", () => {
+  assert.equal(
+    retryableMissingAgyRecipient(
+      missingRecipientError({
+        toolSteps: [sendMessageEvent("DONE", { recipient: "glob", message: "continue" })],
+      }, "read"),
+    ),
+    undefined,
+  );
+  assert.equal(
+    retryableMissingAgyRecipient(
+      missingRecipientError({
+        toolSteps: [
+          sendMessageEvent("DONE", { recipients: ["read", "reviewer"], message: "continue" }),
+        ],
+      }, "read"),
+    ),
+    undefined,
+  );
+});
+
 test("missing-recipient classification rejects other, mixed, or unspecified recipients", () => {
   for (const parameters of [
     { recipient: "parent", message: "continue" },
@@ -209,6 +248,26 @@ test("runProviderAttempts forwards staged-media guard options to recipient recov
 
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.result.terminal.status, "SUCCESS");
+});
+
+test("runProviderAttempts retries a missing OMP tool recipient through structured tool guidance", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Use read to inspect package.json",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw missingRecipientError({}, "read");
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /recipient named "read"/);
+  assert.match(prompts[1] ?? "", /OMP tool names such as read, glob, grep, bash/);
+  assert.match(prompts[1] ?? "", /outer "tool_calls" array/);
 });
 
 test("runProviderAttempts never performs a third AGY attempt", async () => {
