@@ -3,7 +3,7 @@ import { chmod } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { runAgy } from "../src/agy/runner.ts";
+import { AgyRunError, runAgy } from "../src/agy/runner.ts";
 
 const fakeAgy = fileURLToPath(new URL("./fixtures/fake-agy", import.meta.url));
 
@@ -88,6 +88,35 @@ test("runAgy captures nested Antigravity tool and subagent metadata", async () =
   assert.equal(result.toolSteps.length, 1);
   assert.equal(result.subagents.length, 1);
   assert.equal(result.subagents[0]?.role, "reviewer");
+});
+
+test("runAgy preserves terminal and tool events on a failed recipient lookup", async () => {
+  let caught: unknown;
+  try {
+    await runAgy({
+      prompt: "FAKE:RECIPIENT_OMP",
+      cwd: process.cwd(),
+      binary: fakeAgy,
+      printTimeout: "1m",
+      hardTimeoutMs: 10_000,
+      sandbox: true,
+      maxPromptBytes: 100_000,
+      maxStderrBytes: 10_000,
+      killGraceMs: 100,
+      sanitizeAccountEnvironment: true,
+    });
+  } catch (error) {
+    caught = error;
+  }
+
+  assert.ok(caught instanceof AgyRunError);
+  assert.match(caught.message, /recipient "omp" not found/);
+  assert.equal(caught.terminal?.status, "ERROR");
+  assert.equal(caught.terminal?.error, 'recipient "omp" not found');
+  assert.equal(caught.toolSteps.length, 2);
+  assert.equal(caught.toolSteps[0]?.step_update.tool_info?.name, "send_message");
+  assert.equal(caught.subagents.length, 0);
+  assert.equal(caught.terminal?.usage?.input_tokens, 12);
 });
 
 test("runAgy terminates the child when an event callback fails", async () => {
