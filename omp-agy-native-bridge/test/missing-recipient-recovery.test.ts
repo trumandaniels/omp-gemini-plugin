@@ -100,9 +100,14 @@ const flatTaskTool: SerializedTool = {
   },
 };
 
-test("failed send_message to OMP becomes final provider text without another model call", () => {
+test("failed send_message to OMP recovers only a valid bridge envelope", () => {
+  const envelope = JSON.stringify({
+    text: "The audit is complete.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
   const result = synthesizeMissingRecipientRecovery(
-    missingRecipientError("omp", "The audit is complete."),
+    missingRecipientError("omp", envelope),
     "omp",
     [],
   );
@@ -113,6 +118,14 @@ test("failed send_message to OMP becomes final provider text without another mod
     finish_reason: "stop",
   });
   assert.equal(result?.toolSteps.length, 0);
+  assert.equal(
+    synthesizeMissingRecipientRecovery(
+      missingRecipientError("omp", "plain final text"),
+      "omp",
+      [],
+    ),
+    undefined,
+  );
 });
 
 test("failed send_message to subagent becomes an OMP batch task call", () => {
@@ -156,14 +169,22 @@ test("failed send_message to subagent respects the flat OMP task schema", () => 
   });
 });
 
-test("deterministic recovery refuses ambiguous or unsupported routing", () => {
-  const ambiguous = missingRecipientError("subagent", "first", {
+test("deterministic recovery refuses ambiguous, control-only, or unsupported routing", () => {
+  const ambiguous = missingRecipientError("subagent", "first task", {
     toolSteps: [
-      sendMessageEvent("ACTIVE", "subagent", "first"),
-      sendMessageEvent("DONE", "subagent", "second"),
+      sendMessageEvent("ACTIVE", "subagent", "first task"),
+      sendMessageEvent("DONE", "subagent", "second task"),
     ],
   });
   assert.equal(synthesizeMissingRecipientRecovery(ambiguous, "subagent", [batchTaskTool]), undefined);
+  assert.equal(
+    synthesizeMissingRecipientRecovery(
+      missingRecipientError("subagent", "continue"),
+      "subagent",
+      [batchTaskTool],
+    ),
+    undefined,
+  );
   assert.equal(
     synthesizeMissingRecipientRecovery(
       missingRecipientError("read", "package.json"),
@@ -214,8 +235,13 @@ test("provider attempts short-circuit a proven subagent routing failure into OMP
   });
 });
 
-test("provider attempts short-circuit a proven OMP return message into final text", async () => {
+test("provider attempts can recover an exact bridge envelope addressed to OMP", async () => {
   let calls = 0;
+  const envelope = JSON.stringify({
+    text: "I found three UI issues.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
   const outcome = await runProviderAttempts({
     initialPrompt: "Audit the project",
     enforceToolless: true,
@@ -223,7 +249,7 @@ test("provider attempts short-circuit a proven OMP return message into final tex
     ompTools: [],
     invoke: async () => {
       calls += 1;
-      throw missingRecipientError("omp", "I found three UI issues.");
+      throw missingRecipientError("omp", envelope);
     },
   });
 
