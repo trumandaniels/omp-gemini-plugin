@@ -64,6 +64,13 @@ test("runAgy captures nested Antigravity tool and subagent metadata", async () =
   assert.equal(result.subagents[0]?.role, "reviewer");
 });
 
+test("runAgy fails closed on unknown stream events", async () => {
+  await assert.rejects(
+    runAgy(options("FAKE:UNKNOWN_EVENT")),
+    /Could not parse agy stream: Unknown agy stream event: progress/,
+  );
+});
+
 test("runAgy terminates the child when an event callback fails", async () => {
   await assert.rejects(
     runAgy({
