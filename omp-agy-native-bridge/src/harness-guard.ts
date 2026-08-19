@@ -152,7 +152,12 @@ export interface FailedProviderHarnessAttempt {
 }
 
 function failedAttemptDiagnostic(attempt: FailedProviderHarnessAttempt): string {
-  return [attempt.terminal?.error, attempt.message, attempt.stderr]
+  // Prefer the terminal provider diagnostic when AGY supplied one. Do not let a
+  // generic wrapper message containing stale text override a contradictory
+  // terminal error; the retry classifier must prove non-delivery fail-closed.
+  const terminalError = attempt.terminal?.error?.trim();
+  if (terminalError) return terminalError;
+  return [attempt.message, attempt.stderr]
     .filter((value): value is string => typeof value === "string" && value.trim() !== "")
     .join("\n");
 }
