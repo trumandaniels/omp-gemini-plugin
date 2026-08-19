@@ -13,6 +13,7 @@ import { createAgyProviderStream } from "./provider.ts";
 import { Semaphore } from "./semaphore.ts";
 
 type AgyThinkingEffort = NonNullable<Model["thinking"]>["efforts"][number];
+type ProviderModelConfig = NonNullable<Parameters<ExtensionAPI["registerProvider"]>[1]["models"]>[number];
 
 export default function officialAgyBridge(pi: ExtensionAPI): void {
   // Resolve and validate everything before mutating OMP's provider registry.
@@ -25,7 +26,7 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
     models: mergeDiscoveredModels(baseConfig.models, discovery, baseConfig),
   };
   const semaphore = new Semaphore(config.maxConcurrent);
-  const providerModels = config.models.map((model) => {
+  const providerModels: ProviderModelConfig[] = config.models.map((model) => {
     const thinking = model.agyModelIdsByEffort
       ? (() => {
           const efforts: AgyThinkingEffort[] = [];
@@ -45,15 +46,16 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
           };
         })()
       : undefined;
-    const input = bridgeModelInput(model, config.enableImageInput);
 
     return {
       id: model.id,
       name: model.name,
       reasoning: model.reasoning,
       thinking,
-      input,
-      capabilities: { image: input.includes("image") },
+      // OMP's canonical multimodal capability is the `input` array. Do not
+      // attach provider-specific `capabilities` fields that are absent from
+      // ProviderModelConfig and ignored by model-role resolution.
+      input: bridgeModelInput(model, config.enableImageInput),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
