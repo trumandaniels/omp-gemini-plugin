@@ -171,7 +171,10 @@ export function createAgyProviderStream(
         });
 
         if (config.rejectAgyToolUseInProviderMode) {
-          assertProviderHarnessIsToolless(result, config.agentName);
+          assertProviderHarnessIsToolless(result, config.agentName, {
+            cwd: requestCwd,
+            allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
+          });
         }
 
         const output = unwrapNestedBridgeOutput(
