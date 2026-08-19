@@ -38,6 +38,22 @@ test("runAgy parses official stream-json shape", async () => {
   assert.equal(result.eventCount, 3);
 });
 
+test("runAgy transports prompts larger than the host argv budget through stdin", async () => {
+  const result = await runAgy({
+    prompt: `large-context\n${"x".repeat(300_000)}`,
+    cwd: process.cwd(),
+    binary: fakeAgy,
+    printTimeout: "1m",
+    hardTimeoutMs: 10_000,
+    sandbox: true,
+    maxPromptBytes: 400_000,
+    maxStderrBytes: 10_000,
+    killGraceMs: 100,
+    sanitizeAccountEnvironment: true,
+  });
+  assert.equal(result.terminal.status, "SUCCESS");
+});
+
 test("runAgy accepts successful plain-text responses without structured_output", async () => {
   const result = await runAgy({
     prompt: "FAKE:PLAIN",
@@ -57,7 +73,7 @@ test("runAgy accepts successful plain-text responses without structured_output",
   assert.equal(result.toolSteps.length, 0);
 });
 
-test("runAgy refuses oversized argv prompts", async () => {
+test("runAgy refuses prompts above the configured bridge byte limit", async () => {
   await assert.rejects(
     runAgy({
       prompt: "x".repeat(101),
