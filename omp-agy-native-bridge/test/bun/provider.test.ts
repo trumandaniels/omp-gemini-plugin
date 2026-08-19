@@ -49,7 +49,9 @@ function model(bridge: BridgeConfig): Model<Api> {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 100_000,
     maxTokens: 10_000,
-    compat: {},
+    // Current OMP's generic Model<Api> keeps the property required while its
+    // value may be undefined for a custom API with no built-in compatibility flags.
+    compat: undefined,
   };
 }
 
