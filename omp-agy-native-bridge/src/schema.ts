@@ -12,8 +12,91 @@ export interface SerializedTool {
   parameters: Record<string, unknown>;
 }
 
+const MAX_NESTED_OBJECT_OUTPUT_DEPTH = 4;
+const MAX_STRUCTURED_TEXT_DEPTH = 16;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBridgeEnvelope(value: unknown): value is Record<string, unknown> {
+  return isRecord(value)
+    && Array.isArray(value.tool_calls)
+    && (value.finish_reason === "stop" || value.finish_reason === "tool_use");
+}
+
+function firstBridgeEnvelope(value: unknown): Record<string, unknown> | undefined {
+  if (isBridgeEnvelope(value)) return value;
+  if (!Array.isArray(value)) return undefined;
+  return value.find(isBridgeEnvelope);
+}
+
+function nestedBridgeEnvelope(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!Array.isArray(value.tool_calls) || value.tool_calls.length > 0 || value.finish_reason !== "stop") {
+    return undefined;
+  }
+  return firstBridgeEnvelope(value.text);
+}
+
+function structuredTextFromContainer(value: unknown, depth = 0): string | undefined {
+  if (depth > MAX_STRUCTURED_TEXT_DEPTH) return undefined;
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "";
+    const parts: string[] = [];
+    for (const item of value) {
+      const part = structuredTextFromContainer(item, depth + 1);
+      if (part === undefined) return undefined;
+      if (part !== "") parts.push(part);
+    }
+    return parts.join("\n");
+  }
+
+  if (!isRecord(value)) return undefined;
+  if (Object.keys(value).length === 0) return "";
+
+  for (const key of ["text", "value", "content", "parts", "markdown"] as const) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    const text = structuredTextFromContainer(value[key], depth + 1);
+    if (text !== undefined) return text;
+  }
+
+  return undefined;
+}
+
+function describeStructuredTextType(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  if (isRecord(value)) {
+    const keys = Object.keys(value).slice(0, 6);
+    return keys.length > 0 ? `object with keys ${keys.join(", ")}` : "empty object";
+  }
+  return typeof value;
+}
+
+function normalizeBridgeText(value: unknown): string {
+  if (typeof value === "string") return value;
+
+  const extracted = structuredTextFromContainer(value);
+  if (extracted !== undefined) return extracted;
+
+  // AGY occasionally places a JSON answer object/array into the schema's text
+  // slot. It is safe to render that value as user-visible JSON because this path
+  // never executes tools. Bridge-shaped nested objects are promoted and fully
+  // validated before reaching this fallback.
+  if (Array.isArray(value) || isRecord(value)) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      // Fall through to the explicit validation error below.
+    }
+  }
+
+  throw new Error(
+    `agy structured_output.text must be a string or JSON text container; got ${describeStructuredTextType(value)}`,
+  );
 }
 
 function normalizeSerializedBridgeOutput(value: string): string {
@@ -271,13 +354,27 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
   };
 }
 
-export function parseBridgeStructuredOutput(
+function parseBridgeStructuredOutputInternal(
   value: unknown,
   allowedToolNames: readonly string[],
+  depth: number,
 ): BridgeStructuredOutput {
+  if (depth > MAX_NESTED_OBJECT_OUTPUT_DEPTH) {
+    throw new Error("agy structured_output contains too many nested bridge envelopes");
+  }
+
+  if (Array.isArray(value)) {
+    const first = firstBridgeEnvelope(value);
+    if (first) return parseBridgeStructuredOutputInternal(first, allowedToolNames, depth + 1);
+  }
+
   if (!isRecord(value)) throw new Error("agy structured_output must be an object");
-  if (typeof value.text !== "string") throw new Error("agy structured_output.text must be a string");
+
+  const nested = nestedBridgeEnvelope(value);
+  if (nested) return parseBridgeStructuredOutputInternal(nested, allowedToolNames, depth + 1);
+
   if (!Array.isArray(value.tool_calls)) throw new Error("agy structured_output.tool_calls must be an array");
+  const text = normalizeBridgeText(value.text);
   if (value.finish_reason !== "stop" && value.finish_reason !== "tool_use") {
     throw new Error("agy structured_output.finish_reason must be stop or tool_use");
   }
@@ -313,13 +410,20 @@ export function parseBridgeStructuredOutput(
   if (calls.length === 0 && value.finish_reason !== "stop") {
     throw new Error("finish_reason must be stop when tool_calls is empty");
   }
-  if (calls.length === 0 && value.text.length === 0) {
+  if (calls.length === 0 && text.length === 0) {
     throw new Error("agy structured_output must contain text or at least one tool call");
   }
 
   return {
-    text: value.text,
+    text,
     tool_calls: calls,
     finish_reason: value.finish_reason,
   };
+}
+
+export function parseBridgeStructuredOutput(
+  value: unknown,
+  allowedToolNames: readonly string[],
+): BridgeStructuredOutput {
+  return parseBridgeStructuredOutputInternal(value, allowedToolNames, 0);
 }
