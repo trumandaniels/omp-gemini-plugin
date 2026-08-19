@@ -189,6 +189,21 @@ export function discoverAgyModelsSync(
   cwd = process.cwd(),
   timeoutMs = 10_000,
 ): ModelDiscoveryResult {
+  // Prefer the long-standing human-readable command. Current AGY builds in the
+  // wild can reject `models --output-format json` even when nearby releases
+  // advertise it. The table parser is deterministic for model slugs and this
+  // path avoids launching a second eligibility/account-bootstrap process on
+  // the common case.
+  const plain = runModelsCommand(config, ["models"], cwd, timeoutMs);
+  const plainModels = plain.status === 0 && !plain.error
+    ? parseAgyModelsOutput(plain.stdout)
+    : [];
+  if (plainModels.length > 0) {
+    return { ok: true, models: plainModels, ...plain };
+  }
+
+  // Keep machine-readable discovery only as a compatibility fallback for a
+  // future/plain format the table parser no longer recognizes.
   const machine = runModelsCommand(config, ["models", "--output-format", "json"], cwd, timeoutMs);
   const machineModels = machine.status === 0 && !machine.error
     ? parseAgyModelsOutput(machine.stdout)
@@ -197,23 +212,18 @@ export function discoverAgyModelsSync(
     return { ok: true, models: machineModels, ...machine };
   }
 
-  // AGY before machine-readable model listing, and future versions whose JSON
-  // shape we do not yet recognize, still have the human-readable `agy models`
-  // command. Keep that as a compatibility fallback.
-  const plain = runModelsCommand(config, ["models"], cwd, timeoutMs);
-  const models = plain.status === 0 && !plain.error ? parseAgyModelsOutput(plain.stdout) : [];
-  if (models.length === 0) {
-    const diagnostics = [machine.stderr.trim(), plain.stderr.trim()].filter(Boolean).join("\n");
-    return {
-      ok: false,
-      models: [],
-      stdout: plain.stdout || machine.stdout,
-      stderr: diagnostics,
-      status: plain.status ?? machine.status,
-      error: plain.error ?? machine.error ?? (plain.status === 0 ? "agy models returned no recognized model slugs" : undefined),
-    };
-  }
-  return { ok: true, models, ...plain };
+  const diagnostics = [plain.stderr.trim(), machine.stderr.trim()].filter(Boolean).join("\n");
+  return {
+    ok: false,
+    models: [],
+    stdout: machine.stdout || plain.stdout,
+    stderr: diagnostics,
+    status: machine.status ?? plain.status,
+    error:
+      machine.error
+      ?? plain.error
+      ?? (machine.status === 0 && plain.status === 0 ? "agy models returned no recognized model slugs" : undefined),
+  };
 }
 
 export function mergeDiscoveredModels(
