@@ -94,7 +94,7 @@ test("runProviderAttempts recovers the exact missing OMP recipient failure once"
   });
 });
 
-test("missing-recipient classification rejects unrelated AGY activity", () => {
+test("missing-recipient classification rejects unrelated or incomplete AGY activity", () => {
   assert.equal(isRetryableMissingOmpRecipientError(missingRecipientError()), true);
   assert.equal(
     isRetryableMissingOmpRecipientError(
@@ -117,6 +117,14 @@ test("missing-recipient classification rejects unrelated AGY activity", () => {
     isRetryableMissingOmpRecipientError(
       missingRecipientError({ subagents: [{ role: "worker", conversation_id: "child-1" }] }),
     ),
+    false,
+  );
+  assert.equal(
+    isRetryableMissingOmpRecipientError(missingRecipientError({ toolStepCount: 501 })),
+    false,
+  );
+  assert.equal(
+    isRetryableMissingOmpRecipientError(missingRecipientError({ subagentCount: 1 })),
     false,
   );
 });
@@ -164,4 +172,36 @@ test("runProviderAttempts retries a successful read-only AGY control probe once"
 
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.discardedUsage.length, 1);
+});
+
+test("runProviderAttempts does not retry a control probe from a truncated snapshot", async () => {
+  let calls = 0;
+  const result = successfulResult([
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: "conversation-1",
+        step_index: 1,
+        state: "DONE",
+        step_type: "tool",
+        tool_name: "manage_subagents",
+        tool_info: { name: "manage_subagents", parameters: { Action: "list" } },
+      },
+    },
+  ]);
+  result.toolStepCount = 501;
+
+  await assert.rejects(
+    runProviderAttempts({
+      initialPrompt: "prompt",
+      enforceToolless: true,
+      agentName: "omp-bridge-model",
+      invoke: async () => {
+        calls += 1;
+        return result;
+      },
+    }),
+    /activity snapshots were truncated/,
+  );
+  assert.equal(calls, 1);
 });
