@@ -43,6 +43,16 @@ test("bundled provider agent never treats OMP as an AGY recipient", async () => 
   const source = await readFile(agentPath, "utf8");
   assert.match(source, /OMP is the host application and tool dispatcher/);
   assert.match(source, /not an Antigravity agent, recipient, inbox, conversation peer, or addressable name/);
-  assert.match(source, /Never send a message to a recipient named `omp`/);
-  assert.match(source, /Return text or OMP tool calls only through the enforced terminal structured output/);
+  assert.match(source, /Never send a message to a recipient named `omp`, `parent`, or `main`/);
+  assert.match(source, /enforced terminal structured output is already the return channel/);
+  assert.match(source, /place the answer in `text`, or request OMP tools in `tool_calls`/);
+});
+
+test("bundled provider agent continues from incomplete OMP tool results", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /After OMP supplies a tool result/);
+  assert.match(source, /returning the next OMP tool call or the final answer/);
+  assert.match(source, /truncated, limit-reached, skipped, missing, or otherwise incomplete/);
+  assert.match(source, /request narrower OMP tool calls instead of treating it as complete/);
+  assert.match(source, /Never claim exhaustive discovery from an incomplete listing/);
 });
