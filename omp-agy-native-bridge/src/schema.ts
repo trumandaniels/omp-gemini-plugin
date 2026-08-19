@@ -21,6 +21,68 @@ function unwrapSingleJsonFence(value: string): string {
   return (match?.[1] ?? value).trim();
 }
 
+function isJsonWhitespace(value: string | undefined): boolean {
+  return value === " " || value === "\n" || value === "\r" || value === "\t";
+}
+
+function firstConcatenatedJsonObject(value: string): unknown | undefined {
+  let cursor = 0;
+  let count = 0;
+  let first: unknown;
+
+  while (cursor < value.length) {
+    while (cursor < value.length && isJsonWhitespace(value[cursor])) cursor += 1;
+    if (cursor >= value.length) break;
+    if (value[cursor] !== "{") return undefined;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+
+    for (let index = cursor; index < value.length; index += 1) {
+      const char = value[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === "{" || char === "[") {
+        depth += 1;
+        continue;
+      }
+      if (char === "}" || char === "]") {
+        depth -= 1;
+        if (depth < 0) return undefined;
+        if (depth === 0) {
+          end = index + 1;
+          break;
+        }
+      }
+    }
+
+    if (end < 0 || inString || depth !== 0) return undefined;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value.slice(cursor, end));
+    } catch {
+      return undefined;
+    }
+    if (count === 0) first = parsed;
+    count += 1;
+    cursor = end;
+  }
+
+  return count > 1 ? first : undefined;
+}
+
 export function parseAgyTerminalOutput(
   terminal: { structured_output?: unknown; response?: string },
   allowedToolNames: readonly string[],
@@ -38,10 +100,17 @@ export function parseAgyTerminalOutput(
     throw new Error("agy returned neither structured_output nor non-empty response text");
   }
 
+  const normalized = unwrapSingleJsonFence(response);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(unwrapSingleJsonFence(response));
+    parsed = JSON.parse(normalized);
   } catch {
+    // AGY print mode can concatenate several schema-shaped model replies into one
+    // terminal response. The first object is the provider turn; later objects are
+    // harness completion chatter. Only accept a pure JSON-object sequence so normal
+    // plain-text responses keep their existing fallback behavior.
+    const first = firstConcatenatedJsonObject(normalized);
+    if (first !== undefined) return parseBridgeStructuredOutput(first, allowedToolNames);
     return {
       text: response,
       tool_calls: [],
