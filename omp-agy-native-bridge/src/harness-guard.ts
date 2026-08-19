@@ -128,6 +128,11 @@ function activitySummaryFromSteps(
   return `${toolSteps.length} tool invocation(s)${lifecycle}${tools ? ` [${tools}]` : ""}, ${subagentCount} subagent(s)`;
 }
 
+function unexpectedToolNames(toolSteps: readonly AgyStepUpdateEvent[]): string {
+  const names = [...new Set(toolSteps.map(toolStepName))].sort((left, right) => left.localeCompare(right));
+  return names.length > 0 ? names.join(", ") : "none";
+}
+
 export function providerHarnessActivitySummary(
   result: Pick<AgyRunResult, "toolSteps" | "subagents">,
 ): string {
@@ -145,9 +150,11 @@ export function assertProviderHarnessIsToolless(
 ): void {
   const unexpectedTools = unexpectedProviderHarnessToolSteps(result.toolSteps, options);
   if (unexpectedTools.length === 0 && result.subagents.length === 0) return;
+  const names = unexpectedToolNames(unexpectedTools);
   throw new Error(
-    `Provider-mode agy unexpectedly used its own harness (${activitySummaryFromSteps(unexpectedTools, result.toolSteps.length, result.subagents.length)}). `
-      + `The installed ${agentName} definition is stale, inherited AGY customizations, or invoked a non-media tool. `
+    `Forbidden AGY provider tool(s): ${names}. `
+      + `Provider-mode agy unexpectedly used its own harness (${activitySummaryFromSteps(unexpectedTools, result.toolSteps.length, result.subagents.length)}). `
+      + `The installed ${agentName} definition is stale, inherited AGY customizations, or the model misrouted an OMP request to an AGY control tool. `
       + "Run /agy-install-agent (or npm run install-agent -- --force), fully restart OMP, and retry.",
   );
 }
