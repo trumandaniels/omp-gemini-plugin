@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import type { AgyRunResult, AgyStepUpdateEvent } from "./types.ts";
+import type { AgyResultPayload, AgyRunResult, AgyStepUpdateEvent } from "./types.ts";
 
 function toolStepName(event: AgyStepUpdateEvent): string {
   return event.step_update.tool_info?.name
@@ -138,6 +138,50 @@ export function retryableProviderControlToolNames(
     const allowedActions = RETRYABLE_CONTROL_ACTIONS.get(normalizedToolName(toolStepName(event)));
     const action = toolAction(event);
     if (!allowedActions || !action || !allowedActions.has(action)) return undefined;
+  }
+  return [...new Set(unexpected.map(toolStepName))].sort((left, right) => left.localeCompare(right));
+}
+
+export interface FailedProviderHarnessAttempt {
+  message?: string;
+  stderr?: string;
+  status?: string;
+  terminal?: AgyResultPayload;
+  toolSteps: readonly AgyStepUpdateEvent[];
+  subagents: readonly unknown[];
+}
+
+function failedAttemptDiagnostic(attempt: FailedProviderHarnessAttempt): string {
+  return [attempt.terminal?.error, attempt.message, attempt.stderr]
+    .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+    .join("\n");
+}
+
+/**
+ * Classify the one failed AGY action that is safe to discard and retry: a
+ * `send_message` attempt rejected because its recipient does not exist. Since
+ * AGY confirms non-delivery, no message side effect occurred. Every other
+ * failed control, file, command, MCP, or subagent action remains fail-closed.
+ */
+export function retryableFailedProviderControlToolNames(
+  attempt: FailedProviderHarnessAttempt,
+  options: ProviderHarnessGuardOptions = {},
+): string[] | undefined {
+  if (attempt.subagents.length > 0) return undefined;
+  const status = attempt.terminal?.status ?? attempt.status;
+  if (status !== "ERROR" && status !== "INVALID") return undefined;
+  if (!/recipient\s+(?:"[^"]+"|'[^']+'|\S+)\s+not\s+found/i.test(failedAttemptDiagnostic(attempt))) {
+    return undefined;
+  }
+
+  const unexpected = unexpectedProviderHarnessToolSteps(attempt.toolSteps, options);
+  if (unexpected.length === 0) {
+    // Older AGY builds may emit only the terminal recipient-not-found error and
+    // omit the failed tool lifecycle event. The diagnostic proves non-delivery.
+    return ["send_message"];
+  }
+  if (unexpected.some((event) => normalizedToolName(toolStepName(event)) !== "sendmessage")) {
+    return undefined;
   }
   return [...new Set(unexpected.map(toolStepName))].sort((left, right) => left.localeCompare(right));
 }
