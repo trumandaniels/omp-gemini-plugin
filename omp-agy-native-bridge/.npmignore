@@ -1,0 +1,7 @@
+*.Zone.Identifier
+**/*.Zone.Identifier
+.tmp-pi/
+node_modules/
+coverage/
+dist/
+test/
