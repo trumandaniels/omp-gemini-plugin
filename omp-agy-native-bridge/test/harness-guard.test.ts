@@ -43,6 +43,23 @@ test("uniqueAgyToolSteps collapses ACTIVE and DONE updates", () => {
   );
 });
 
+test("provider guard puts the exact AGY control tool before the long diagnostic", () => {
+  assert.throws(
+    () =>
+      assertProviderHarnessIsToolless(
+        {
+          toolSteps: [
+            toolEvent("ACTIVE", 7, "manage_subagents", { Action: "list" }),
+            toolEvent("DONE", 7, "manage_subagents", { Action: "list" }),
+          ],
+          subagents: [],
+        },
+        "omp-bridge-model",
+      ),
+    /^Error: Forbidden AGY provider tool\(s\): manage_subagents\./,
+  );
+});
+
 test("assertProviderHarnessIsToolless allows duplicate read lifecycle events for an exact staged image", () => {
   const cwd = process.cwd();
   const mediaPath = resolve(cwd, ".omp-agy-media-test/image-1.png");
