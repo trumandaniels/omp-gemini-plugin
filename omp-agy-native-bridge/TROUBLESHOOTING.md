@@ -137,7 +137,38 @@ The improved error reports unique tool invocation names and distinguishes them f
 
 is much more diagnostic than the previous raw count.
 
+If AGY emits more tool or subagent activity than the bridge can retain in its bounded diagnostic snapshots, provider mode fails closed rather than deciding that the unseen activity was safe.
+
 Do **not** set `rejectAgyToolUseInProviderMode: false` as a workaround. That would allow Antigravity and OMP to become competing workspace harnesses, bypassing OMP's native tool cards and permission boundary.
+
+## `agy failed: recipient "omp" not found`
+
+This means the Antigravity model mistook OMP for an addressable Antigravity agent or inbox and attempted an internal `send_message` call. OMP is the host application and tool dispatcher; it is not an AGY recipient.
+
+Current provider mode recognizes only the exact, side-effect-free form of this failure. It discards the failed attempt and retries once when all of the following are true:
+
+- the terminal status is `ERROR`;
+- the terminal error is exactly `recipient "omp" not found`;
+- no Antigravity subagent was observed;
+- every complete AGY tool snapshot belongs to `send_message`;
+- the activity snapshots were not truncated.
+
+The failed message result is never inserted into OMP history. Token usage from the discarded attempt is still counted. There is one shared retry budget, so one OMP provider turn can launch at most two AGY processes.
+
+Update both prompt layers before retesting:
+
+```bash
+git switch main
+git pull
+cd omp-agy-native-bridge
+npm run install-agent -- --force
+omp plugin install "$PWD"
+npm run doctor:live
+```
+
+Then fully terminate every OMP and AGY process and restart OMP. A native OMP coordination tool named `hub` remains available when it appears in the OMP tool catalog; the fix blocks only Antigravity messaging and coordination tools from being invoked inside provider mode.
+
+If the same error survives the one corrective retry, or if any file/search/command/MCP/subagent activity accompanies it, the bridge deliberately returns an error instead of silently continuing.
 
 ## Unknown model selection
 
