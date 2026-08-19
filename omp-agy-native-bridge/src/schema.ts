@@ -16,71 +16,79 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function unwrapSingleJsonFence(value: string): string {
-  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(value.trim());
-  return (match?.[1] ?? value).trim();
+function normalizeSerializedBridgeOutput(value: string): string {
+  const trimmed = value.trim();
+  const wholeFence = /^(```|~~~)(?:json)?\s*([\s\S]*?)\s*\1$/i.exec(trimmed);
+  if (wholeFence) return wholeFence[2].trim();
+
+  // AGY may fence each schema-shaped response separately. Remove only the first
+  // opening fence; the prefix parser below deliberately ignores everything after
+  // the first complete bridge object.
+  return trimmed.replace(/^(?:```|~~~)(?:json)?\s*/i, "").trimStart();
 }
 
-function isJsonWhitespace(value: string | undefined): boolean {
-  return value === " " || value === "\n" || value === "\r" || value === "\t";
-}
+function firstJsonObject(value: string): unknown | undefined {
+  const normalized = value.trimStart();
+  if (!normalized.startsWith("{")) return undefined;
 
-function firstConcatenatedJsonObject(value: string): unknown | undefined {
-  let cursor = 0;
-  let count = 0;
-  let first: unknown;
+  const expectedClosers: string[] = [];
+  let inString = false;
+  let escaped = false;
 
-  while (cursor < value.length) {
-    while (cursor < value.length && isJsonWhitespace(value[cursor])) cursor += 1;
-    if (cursor >= value.length) break;
-    if (value[cursor] !== "{") return undefined;
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
 
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    let end = -1;
-
-    for (let index = cursor; index < value.length; index += 1) {
-      const char = value[index];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === '"') inString = false;
-        continue;
-      }
-
-      if (char === '"') {
-        inString = true;
-        continue;
-      }
-      if (char === "{" || char === "[") {
-        depth += 1;
-        continue;
-      }
-      if (char === "}" || char === "]") {
-        depth -= 1;
-        if (depth < 0) return undefined;
-        if (depth === 0) {
-          end = index + 1;
-          break;
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === "{") {
+      expectedClosers.push("}");
+      continue;
+    }
+    if (char === "[") {
+      expectedClosers.push("]");
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      if (expectedClosers.pop() !== char) return undefined;
+      if (expectedClosers.length === 0) {
+        try {
+          return JSON.parse(normalized.slice(0, index + 1));
+        } catch {
+          return undefined;
         }
       }
     }
-
-    if (end < 0 || inString || depth !== 0) return undefined;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(value.slice(cursor, end));
-    } catch {
-      return undefined;
-    }
-    if (count === 0) first = parsed;
-    count += 1;
-    cursor = end;
   }
 
-  return count > 1 ? first : undefined;
+  return undefined;
+}
+
+function parseSerializedBridgeOutput(
+  value: string,
+  allowedToolNames: readonly string[],
+): BridgeStructuredOutput {
+  const normalized = normalizeSerializedBridgeOutput(value);
+  try {
+    return parseBridgeStructuredOutput(JSON.parse(normalized), allowedToolNames);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+
+    // The AGY harness can append extra schema-shaped completion messages to the
+    // first provider response. Long runs can also truncate that later chatter.
+    // The first complete object is the actual provider turn, so validate it and
+    // ignore all later bytes rather than requiring the entire tail to be valid.
+    const first = firstJsonObject(normalized);
+    if (first !== undefined) return parseBridgeStructuredOutput(first, allowedToolNames);
+    throw error;
+  }
 }
 
 export function parseAgyTerminalOutput(
@@ -88,11 +96,9 @@ export function parseAgyTerminalOutput(
   allowedToolNames: readonly string[],
 ): BridgeStructuredOutput {
   if (terminal.structured_output !== undefined && terminal.structured_output !== null) {
-    const value =
-      typeof terminal.structured_output === "string"
-        ? JSON.parse(unwrapSingleJsonFence(terminal.structured_output))
-        : terminal.structured_output;
-    return parseBridgeStructuredOutput(value, allowedToolNames);
+    return typeof terminal.structured_output === "string"
+      ? parseSerializedBridgeOutput(terminal.structured_output, allowedToolNames)
+      : parseBridgeStructuredOutput(terminal.structured_output, allowedToolNames);
   }
 
   const response = terminal.response;
@@ -100,25 +106,16 @@ export function parseAgyTerminalOutput(
     throw new Error("agy returned neither structured_output nor non-empty response text");
   }
 
-  const normalized = unwrapSingleJsonFence(response);
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(normalized);
-  } catch {
-    // AGY print mode can concatenate several schema-shaped model replies into one
-    // terminal response. The first object is the provider turn; later objects are
-    // harness completion chatter. Only accept a pure JSON-object sequence so normal
-    // plain-text responses keep their existing fallback behavior.
-    const first = firstConcatenatedJsonObject(normalized);
-    if (first !== undefined) return parseBridgeStructuredOutput(first, allowedToolNames);
+    return parseSerializedBridgeOutput(response, allowedToolNames);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
     return {
       text: response,
       tool_calls: [],
       finish_reason: "stop",
     };
   }
-
-  return parseBridgeStructuredOutput(parsed, allowedToolNames);
 }
 
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);

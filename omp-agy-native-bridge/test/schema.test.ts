@@ -166,6 +166,67 @@ test("parseAgyTerminalOutput preserves a first tool call before concatenated com
   });
 });
 
+test("parseAgyTerminalOutput keeps the first result when later chatter is truncated", () => {
+  const first = JSON.stringify({
+    text: "Long answer with {braces}, [arrays], and markdown.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  const completeChatter = JSON.stringify({
+    text: "Task complete.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  const response = `${first}\n${completeChatter}\n{"text":"truncated`;
+
+  assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
+    text: "Long answer with {braces}, [arrays], and markdown.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
+test("parseAgyTerminalOutput handles separately fenced completion objects", () => {
+  const first = JSON.stringify({
+    text: "First fenced result.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  const chatter = JSON.stringify({
+    text: "Completed.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  const response = `\`\`\`json\n${first}\n\`\`\`\n\`\`\`json\n${chatter}\n\`\`\``;
+
+  assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
+    text: "First fenced result.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
+test("parseAgyTerminalOutput handles concatenated structured_output strings", () => {
+  const structuredOutput = [
+    {
+      text: "Structured first result.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+    {
+      text: "Completed.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+  ].map((value) => JSON.stringify(value)).join("\n");
+
+  assert.deepEqual(parseAgyTerminalOutput({ structured_output: structuredOutput }, []), {
+    text: "Structured first result.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
 test("parseAgyTerminalOutput unwraps fenced JSON in response", () => {
   const parsed = parseAgyTerminalOutput(
     {
