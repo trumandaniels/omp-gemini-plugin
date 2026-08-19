@@ -7,12 +7,12 @@ import {
   type ProviderHarnessGuardOptions,
 } from "./harness-guard.ts";
 import {
-  appendMissingOmpRecipientRetryInstruction,
+  appendMissingAgyRecipientRetryInstruction,
   appendProviderHarnessRetryInstruction,
 } from "./prompt.ts";
 import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 
-const MISSING_OMP_RECIPIENT = /^recipient\s+["'`“”‘’]?omp["'`“”‘’]?\s+(?:was\s+)?not\s+found\.?$/i;
+const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|“([^”]+)”|‘([^’]+)’|([a-zA-Z0-9_.-]+))\s+(?:was\s+)?not\s+found\.?$/i;
 const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
 const RETRYABLE_PERMISSION_CONVERSION_TOOLS = new Set([
   "schedule",
@@ -51,41 +51,61 @@ function collectRecipients(value: unknown, parentKey = ""): string[] {
     .flatMap(([key, child]) => collectRecipients(child, key));
 }
 
+function missingRecipientName(error: AgyRunError): string | undefined {
+  if (error.terminal?.status !== "ERROR") return undefined;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string") return undefined;
+  const match = MISSING_RECIPIENT.exec(terminalError.trim());
+  if (!match) return undefined;
+  return match.slice(1).find((value): value is string => typeof value === "string" && value.trim() !== "")?.trim();
+}
+
 /**
- * Classify only the exact, side-effect-free AGY routing failure observed when
- * the model mistakes OMP for an Antigravity message recipient. Any subagent,
- * unrelated tool, non-OMP recipient, missing recipient parameter, or truncated
- * activity snapshot keeps the failure closed. Exact staged-media reads may
- * coexist because the harness guard has already scoped those to bridge-owned
- * temporary image inputs.
+ * Classify only an exact, side-effect-free AGY missing-recipient failure.
+ *
+ * Provider mode forbids Antigravity messaging entirely, but the model can still
+ * misroute an OMP tool name (for example `read`) through AGY `send_message`.
+ * A retry is safe only when the terminal diagnostic proves that no recipient
+ * existed, activity snapshots are complete, no AGY subagent ran, and every
+ * non-media lifecycle event is the failed send_message targeting that exact
+ * missing recipient. Exact staged-media hydration reads may coexist.
  */
-export function isRetryableMissingOmpRecipientError(
+export function retryableMissingAgyRecipient(
   error: unknown,
   options: ProviderHarnessGuardOptions = {},
-): error is AgyRunError {
-  if (!(error instanceof AgyRunError)) return false;
-  if (error.terminal?.status !== "ERROR") return false;
-  const terminalError = error.terminal.error;
-  if (typeof terminalError !== "string" || !MISSING_OMP_RECIPIENT.test(terminalError.trim())) return false;
-  if (!providerHarnessSnapshotsComplete(error)) return false;
-  if (error.subagents.length > 0) return false;
+): string | undefined {
+  if (!(error instanceof AgyRunError)) return undefined;
+  const missingRecipient = missingRecipientName(error);
+  if (!missingRecipient) return undefined;
+  if (!providerHarnessSnapshotsComplete(error)) return undefined;
+  if (error.subagents.length > 0) return undefined;
 
   const unexpected = unexpectedProviderHarnessToolSteps(error.toolSteps, options);
   if (unexpected.length === 0) {
     // Some AGY versions emit only the terminal failure and omit the failed
     // send_message lifecycle event. The exact nonexistent-recipient diagnostic
     // proves that no message was delivered, so one corrected retry is safe.
-    return true;
+    return missingRecipient;
   }
 
+  const expectedRecipient = normalizedToken(missingRecipient);
   for (const event of unexpected) {
-    if (normalizedToken(toolStepName(event)) !== "sendmessage") return false;
+    if (normalizedToken(toolStepName(event)) !== "sendmessage") return undefined;
     const recipients = collectRecipients(event.step_update.tool_info?.parameters ?? {});
-    if (recipients.length === 0) return false;
-    if (recipients.some((recipient) => normalizedToken(recipient) !== "omp")) return false;
+    if (recipients.length === 0) return undefined;
+    if (recipients.some((recipient) => normalizedToken(recipient) !== expectedRecipient)) return undefined;
   }
 
-  return true;
+  return missingRecipient;
+}
+
+/** Backward-compatible exact OMP-recipient classifier used by older callers/tests. */
+export function isRetryableMissingOmpRecipientError(
+  error: unknown,
+  options: ProviderHarnessGuardOptions = {},
+): error is AgyRunError {
+  const recipient = retryableMissingAgyRecipient(error, options);
+  return recipient !== undefined && normalizedToken(recipient) === "omp";
 }
 
 /**
@@ -137,9 +157,9 @@ export interface ProviderAttemptOutcome {
  * Run at most two AGY processes for one OMP provider turn.
  *
  * A second attempt is allowed only for one of three tightly bounded cases:
- * 1. the exact `recipient "omp" not found` routing error with complete activity
- *    snapshots, no AGY subagent, no non-media workspace activity, and only an
- *    explicitly OMP-targeted send_message attempt when lifecycle data exists;
+ * 1. an exact missing-recipient routing error with complete activity snapshots,
+ *    no AGY subagent, no non-media workspace activity, and only send_message
+ *    lifecycle events targeting the same recipient named in the terminal error;
  * 2. an AGY permission-conversion failure for a known forbidden provider-mode
  *    control tool, before that tool executes and with no unrelated activity; or
  * 3. an otherwise successful read-only AGY control probe already classified by
@@ -164,10 +184,13 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   } catch (error) {
     if (!options.enforceToolless) throw error;
 
-    if (isRetryableMissingOmpRecipientError(error, guardOptions)) {
-      if (error.terminal?.usage) discardedUsage.push(error.terminal.usage);
+    const missingRecipient = retryableMissingAgyRecipient(error, guardOptions);
+    if (missingRecipient) {
+      if (error instanceof AgyRunError && error.terminal?.usage) {
+        discardedUsage.push(error.terminal.usage);
+      }
       retried = true;
-      result = await invoke(appendMissingOmpRecipientRetryInstruction(options.initialPrompt));
+      result = await invoke(appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient));
     } else {
       const permissionTool = retryablePermissionConversionTool(error, guardOptions);
       if (!permissionTool) throw error;
