@@ -14,6 +14,15 @@ import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
 
 const ANSI_ESCAPE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 const PORTABLE_AGENT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const AGENT_NAME_FIELDS = new Set(["name", "id", "agent", "agentName", "agent_name", "slug"]);
+const AGENT_LIST_FIELDS = new Set([
+  "agents",
+  "items",
+  "data",
+  "result",
+  "customAgents",
+  "custom_agents",
+]);
 
 function configuredModelSlugs(model: BridgeModelDefinition): string[] {
   if (model.id === "auto") return [];
@@ -42,13 +51,21 @@ function collectJsonAgentNames(value: unknown, found: string[], seen: Set<string
 
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     // Support both an array of agent objects and a map keyed by agent name.
-    if (PORTABLE_AGENT_NAME.test(key) && !["agents", "items", "data", "result"].includes(key)) {
+    // Only object-valued, non-metadata keys can be interpreted as map keys;
+    // otherwise fields such as `name` or `description` would become false agents.
+    if (
+      !AGENT_NAME_FIELDS.has(key)
+      && !AGENT_LIST_FIELDS.has(key)
+      && PORTABLE_AGENT_NAME.test(key)
+      && child !== null
+      && typeof child === "object"
+    ) {
       addAgentName(found, seen, key);
     }
-    if (["name", "id", "agent", "agentName", "agent_name", "slug"].includes(key)) {
+    if (AGENT_NAME_FIELDS.has(key)) {
       addAgentName(found, seen, child);
     }
-    if (["agents", "items", "data", "result", "customAgents", "custom_agents"].includes(key)) {
+    if (AGENT_LIST_FIELDS.has(key)) {
       collectJsonAgentNames(child, found, seen, depth + 1);
     }
   }
