@@ -34,6 +34,9 @@ export const DEFAULT_CONFIG: BridgeConfig = {
   sanitizeAccountEnvironment: true,
   rejectAgyToolUseInProviderMode: true,
   enableDelegateTool: true,
+  enableImageInput: true,
+  maxImageCount: 20,
+  maxImageBytes: 50 * 1024 * 1024,
   discoverModels: true,
   includeNonGeminiModels: false,
   discoveredContextWindow: 1_000_000,
@@ -112,6 +115,7 @@ export function loadBridgeConfig(cwd = process.cwd()): BridgeConfig {
       config.rejectAgyToolUseInProviderMode,
     ),
     enableDelegateTool: envBoolean("AGY_BRIDGE_ENABLE_DELEGATE", config.enableDelegateTool),
+    enableImageInput: envBoolean("AGY_BRIDGE_ENABLE_IMAGES", config.enableImageInput),
     discoverModels: envBoolean("AGY_BRIDGE_DISCOVER_MODELS", config.discoverModels),
     includeNonGeminiModels: envBoolean(
       "AGY_BRIDGE_INCLUDE_NON_GEMINI",
@@ -119,6 +123,8 @@ export function loadBridgeConfig(cwd = process.cwd()): BridgeConfig {
     ),
     maxConcurrent: envInteger("AGY_BRIDGE_MAX_CONCURRENT", config.maxConcurrent),
     maxPromptBytes: envInteger("AGY_BRIDGE_MAX_PROMPT_BYTES", config.maxPromptBytes),
+    maxImageCount: envInteger("AGY_BRIDGE_MAX_IMAGES", config.maxImageCount),
+    maxImageBytes: envInteger("AGY_BRIDGE_MAX_IMAGE_BYTES", config.maxImageBytes),
     hardTimeoutMs: envInteger("AGY_BRIDGE_HARD_TIMEOUT_MS", config.hardTimeoutMs),
     discoveredContextWindow: envInteger(
       "AGY_BRIDGE_DISCOVERED_CONTEXT_WINDOW",
@@ -157,6 +163,8 @@ export function validateBridgeConfig(config: BridgeConfig): void {
     "maxToolSchemaChars",
     "maxStderrBytes",
     "killGraceMs",
+    "maxImageCount",
+    "maxImageBytes",
     "discoveredContextWindow",
     "discoveredMaxTokens",
   ] as const) {
@@ -175,6 +183,20 @@ export function validateBridgeConfig(config: BridgeConfig): void {
     seen.add(model.id);
     if (model.contextWindow <= 0 || model.maxTokens <= 0) {
       throw new Error(`Invalid token limits for model ${model.id}`);
+    }
+    if (model.supportsImages !== undefined && typeof model.supportsImages !== "boolean") {
+      throw new Error(`Model ${model.id} supportsImages must be boolean when supplied`);
+    }
+    if (model.capabilities !== undefined) {
+      if (!model.capabilities || typeof model.capabilities !== "object" || Array.isArray(model.capabilities)) {
+        throw new Error(`Model ${model.id} capabilities must be an object when supplied`);
+      }
+      for (const key of ["image", "vision"] as const) {
+        const value = model.capabilities[key];
+        if (value !== undefined && typeof value !== "boolean") {
+          throw new Error(`Model ${model.id} capabilities.${key} must be boolean when supplied`);
+        }
+      }
     }
   }
 }
