@@ -36,3 +36,13 @@ test("bundled provider agent routes named subagents through OMP only", async () 
     assert.match(source, new RegExp(`\\b${tool}\\b`));
   }
 });
+
+test("bundled provider agent never reports OMP tool results through AGY messaging", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /OMP is not an Antigravity agent or message recipient/);
+  assert.match(source, /Never call `send_message` or `manage_inbox` with recipient\/to `omp`, `parent`, or `main`/);
+  assert.match(source, /After OMP supplies a tool result/);
+  assert.match(source, /final answer in terminal structured output/);
+  assert.match(source, /structured output is already delivered back to OMP/);
+  assert.match(source, /no separate report-back message is needed/);
+});
