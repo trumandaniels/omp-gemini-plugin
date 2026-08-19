@@ -51,6 +51,8 @@ This gives defense in depth:
 4. stream inspection;
 5. OMP tool argument validation and permissions.
 
+Explicit OMP image inputs are the only provider-mode media exception. The bridge exposes them as temporary prompt attachments; this does not grant the Antigravity agent general file access.
+
 ## Never use the dangerous flag
 
 The provider and delegate implementations do not pass:
@@ -63,10 +65,11 @@ Official headless mode may soft-deny tools that require approval and still exit 
 
 ## Prompt injection
 
-All repository text and tool output included in the reconstructed OMP context is untrusted data. The bridge prompt establishes that:
+All repository text, image content, and tool output included in the reconstructed OMP context is untrusted data. The bridge prompt establishes that:
 
 - OMP system instructions outrank repository content;
 - Antigravity cannot execute its own tools in provider mode;
+- temporary image attachments do not authorize unrelated workspace access;
 - requests for action must become OMP tool calls;
 - the model must not fabricate results.
 
@@ -86,19 +89,25 @@ A production hardening pass should replace the denylist with a tested explicit a
 
 ## Temporary files
 
-Provider mode writes only the JSON response schema into a fresh operating-system temporary directory. It does not write prompts or tokens to disk. The directory is removed in `finally`.
+Every provider run writes the JSON response schema into a fresh operating-system temporary directory. It does not write the textual prompt or tokens to disk. The directory is removed in `finally`.
+
+When a turn contains OMP image blocks, the bridge additionally decodes only the allowed image media types into a fresh `.omp-agy-media-*` directory inside the active request workspace. The directory is created with mode `0700`, files are created with mode `0600`, configured count/aggregate-byte ceilings are enforced before launch, and cleanup runs after the AGY process exits. Raw base64 is excluded from the serialized conversation.
+
+A hard process or host crash can bypass JavaScript cleanup and leave that hidden directory behind. Treat the workspace as containing sensitive user inputs and remove stale `.omp-agy-media-*` directories before sharing or archiving it. Disable this transport with `enableImageInput: false` when temporary workspace media is unacceptable.
 
 OMP itself may persist conversation histories containing user prompts and tool results according to normal OMP settings.
 
 ## Workspace access
 
-Provider-mode `agy` is launched with `--sandbox`, but the principal protection is the tool-less custom agent. The prompt contains repository excerpts already obtained by OMP; Antigravity should not inspect the workspace independently.
+Provider-mode `agy` is launched with `--sandbox`, but the principal protection is the tool-less custom agent. The prompt contains repository excerpts already obtained by OMP and may contain explicit temporary image attachments; Antigravity should not inspect the workspace independently beyond those attached media inputs.
 
 Delegate mode is different: the normal Antigravity harness may read/write the active workspace under its settings and permissions. Use a disposable worktree or read-only prompt for risky tasks.
 
 ## Denial of service and quotas
 
 Every OMP model turn creates a process and consumes Antigravity quota. Tool loops and OMP subagents multiply that load. The semaphore limits concurrent processes but not total turns.
+
+Image replay also creates local decode/write work on every stateless turn. `maxImageCount` and `maxImageBytes` bound one request, but they are not session-wide budgets.
 
 Add run budgets, per-session request ceilings, and cross-process concurrency before unattended or overnight operation.
 
@@ -114,6 +123,7 @@ Provider mode rejects:
 - non-object tool arguments;
 - inconsistent finish reasons;
 - more than 32 tool calls in one model turn;
+- unsupported, malformed, excessive, or oversized image inputs;
 - unexpected Antigravity tool/subagent activity.
 
 Fail closed rather than falling back to raw text or another provider.

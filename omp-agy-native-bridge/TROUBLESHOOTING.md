@@ -112,6 +112,78 @@ official-agy/auto
 
 for the current default. Exact slugs are synchronously read from `agy models` and registered as a normal model array before the provider is added; configured entries in `.omp/agy-bridge.json` are merged in. This avoids depending on OMP extension-only `fetchDynamicModels` during cold start.
 
+## `inspect_image` says the official-agy model does not support image input
+
+OMP does not read `capabilities.image` directly from the bridge config at call time. It checks the registered model's `input` array. Upgrade/reinstall this bridge and restart OMP so explicit Gemini logical models are registered with:
+
+```json
+{
+  "input": ["text", "image"]
+}
+```
+
+Configure a deterministic vision role in `~/.omp/agent/config.yml` or `<repo>/.omp/config.yml`:
+
+```yaml
+modelRoles:
+  vision: official-agy/gemini-3.7-flash
+```
+
+Use an explicit logical Gemini model rather than `official-agy/auto`. `auto` remains text-only by default because the bridge cannot know which account model the CLI will select.
+
+For a custom or pinned model entry, explicitly mark image support in `agy-bridge.json`:
+
+```json
+{
+  "models": [
+    {
+      "id": "my-vision-route",
+      "name": "My vision route",
+      "reasoning": true,
+      "contextWindow": 1000000,
+      "maxTokens": 64000,
+      "agyModelId": "gemini-example",
+      "capabilities": {
+        "image": true
+      }
+    }
+  ]
+}
+```
+
+`supportsImages: true` is an equivalent bridge-native override. After editing either OMP or bridge configuration, fully restart OMP; provider metadata is registered at process startup.
+
+## The model is marked vision-capable but the screenshot is not understood
+
+The bridge transports OMP image blocks by writing private temporary files under `.omp-agy-media-*` in the request workspace and adding AGY `@file` media mentions to the headless prompt.
+
+Check, in order:
+
+1. `enableImageInput` is `true` and `AGY_BRIDGE_ENABLE_IMAGES` is not `false`.
+2. The selected role is an explicit image-capable model, not `official-agy/auto`.
+3. The input is PNG, JPEG, GIF, WebP, BMP, TIFF, or SVG.
+4. The turn does not exceed `maxImageCount` or `maxImageBytes`.
+5. Your installed `agy` build supports ordinary media/file-mention preprocessing in print mode.
+6. The custom agent was reinstalled after upgrading this bridge:
+
+   ```bash
+   npm run install-agent -- --force
+   ```
+
+Run an isolated AGY test in a disposable directory with a small image:
+
+```bash
+agy -p "Describe @./test.png in one sentence." --output-format json --print-timeout 2m
+```
+
+If that direct command cannot see the image, the bridge cannot repair the installed CLI's headless media behavior. Upgrade `agy` or configure another OMP-native vision provider for `modelRoles.vision`.
+
+A force-killed process or host crash can leave `.omp-agy-media-*` behind. Remove stale directories only after confirming no bridge process is active:
+
+```bash
+find . -maxdepth 1 -type d -name '.omp-agy-media-*' -print
+```
+
 ## Prompt exceeds `AGY_BRIDGE_MAX_PROMPT_BYTES`
 
 Provider mode sends the reconstructed OMP context through the `-p` process argument. Solutions, in order:
@@ -131,13 +203,23 @@ Expected in provider mode. `--json-schema` constrains the terminal result, so th
 
 Delegate mode can show incremental progress because it does not reinterpret the final response as an OMP function-call envelope.
 
+## Raw bridge JSON appears instead of a tool card or answer
+
+The bridge handles three known AGY output shapes:
+
+- several concatenated bridge objects;
+- valid first output followed by truncated completion chatter;
+- a bridge object serialized again inside the outer `text` field.
+
+Upgrade/reinstall the plugin and restart OMP. If raw JSON still appears, capture the complete terminal `result.response` and `result.structured_output` values with secrets removed. Do not rely only on the rendered TUI screenshot; exact escaping and fence placement determine which parser path ran.
+
 ## A tool call has invalid arguments
 
 OMP should return a normal tool error and invoke the model again. The terminal schema restricts tool names but intentionally does not embed every full OMP tool schema because some schemas are large or use constructs Antigravity's structured-output implementation may reject.
 
 The prompt still contains a bounded textual schema catalog. Do not execute arguments directly inside the bridge.
 
-## Subagents use another model
+## Subagents or one-shot tools use another model
 
 Selecting the provider for the parent does not rewrite OMP role configuration. Add:
 
@@ -148,9 +230,10 @@ modelRoles:
   task: official-agy/gemini-3.7-flash
   slow: official-agy/gemini-3.1-pro
   plan: official-agy/gemini-3.1-pro
+  vision: official-agy/gemini-3.7-flash
 ```
 
-Use `/model` or OMP config inspection to verify the resolved child role and the active thinking level.
+Use `/model` or OMP config inspection to verify the resolved child/one-shot role and the active thinking level.
 
 ## Subagents appear stuck or run serially
 

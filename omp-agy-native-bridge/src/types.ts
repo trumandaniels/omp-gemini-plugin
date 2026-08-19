@@ -12,6 +12,13 @@ export interface BridgeModelDefinition {
   agyModelId?: string;
   /** Exact tiered slugs passed to `agy --model`, keyed by OMP thinking effort. */
   agyModelIdsByEffort?: Partial<Record<AgyEffort, string>>;
+  /** Explicit image-input override. When omitted, Gemini logical models are inferred as multimodal. */
+  supportsImages?: boolean;
+  /** Compatibility alias for model catalogs/configs that describe image support as capabilities. */
+  capabilities?: {
+    image?: boolean;
+    vision?: boolean;
+  };
 }
 export interface BridgeConfig {
   providerId: string;
@@ -33,6 +40,9 @@ export interface BridgeConfig {
   sanitizeAccountEnvironment: boolean;
   rejectAgyToolUseInProviderMode: boolean;
   enableDelegateTool: boolean;
+  enableImageInput: boolean;
+  maxImageCount: number;
+  maxImageBytes: number;
   discoverModels: boolean;
   includeNonGeminiModels: boolean;
   discoveredContextWindow: number;

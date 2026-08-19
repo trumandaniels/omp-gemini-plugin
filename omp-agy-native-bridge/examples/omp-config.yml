@@ -8,6 +8,7 @@ modelRoles:
   task: official-agy/gemini-3.7-flash
   slow: official-agy/gemini-3.1-pro
   plan: official-agy/gemini-3.1-pro
+  vision: official-agy/gemini-3.7-flash
   advisor: official-agy/auto
 # OMP task fan-out plus the bridge's own semaphore should remain bounded.
 task:

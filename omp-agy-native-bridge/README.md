@@ -42,7 +42,7 @@ OMP therefore remains authoritative for:
 
 ## Current status
 
-This ZIP contains a **working prototype**, not a claim of production readiness. The packaged source check and 20 fake-process/unit tests pass; see [VALIDATION.md](VALIDATION.md). A live end-to-end run still requires your locally installed and authenticated `agy` plus your installed OMP version.
+This package is a **working prototype**, not a claim of production readiness. The repository includes source checks plus fake-process and unit coverage; run `npm check` against your checkout. A live end-to-end run still requires your locally installed and authenticated `agy` plus your installed OMP version.
 
 Known structural limitations are documented in [ARCHITECTURE.md](ARCHITECTURE.md) and [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
@@ -77,7 +77,7 @@ The bridge does not read, copy, or store the OAuth tokens itself. The official `
 From this extracted directory:
 
 ```bash
-npm test
+npm check
 npm run install-agent -- --force
 omp plugin install "$PWD"
 omp plugin doctor
@@ -131,6 +131,45 @@ Use task to have two subagents independently inspect the test strategy and the e
 
 For OMP child sessions to use the bridge too, configure model roles as shown in [`examples/omp-config.yml`](examples/omp-config.yml).
 
+## Image input and `modelRoles.vision`
+
+Discovered explicit Gemini logical models such as `official-agy/gemini-3.7-flash` are registered with OMP as accepting both text and image input. Configure the OMP vision role explicitly so `inspect_image` has a deterministic route:
+
+```yaml
+modelRoles:
+  vision: official-agy/gemini-3.7-flash
+```
+
+For each provider turn containing image blocks, the bridge:
+
+1. validates the media type, count, and aggregate decoded size;
+2. writes private temporary image files inside the request workspace;
+3. maps the conversation's image blocks to numbered placeholders;
+4. adds normal AGY `@file` media mentions to the headless prompt;
+5. removes the temporary directory after the AGY process finishes.
+
+The raw base64 image bytes are never inserted into the model's textual conversation transcript.
+
+`official-agy/auto` remains text-only by default because provider registration cannot know which account model the CLI will choose. To explicitly mark a configured entry as image-capable, add either field inside that model entry:
+
+```json
+{
+  "capabilities": {
+    "image": true
+  }
+}
+```
+
+or:
+
+```json
+{
+  "supportsImages": true
+}
+```
+
+Set `supportsImages: false` to override the automatic Gemini-family inference. Set `enableImageInput: false` or `AGY_BRIDGE_ENABLE_IMAGES=false` to disable the transport globally.
+
 ## Configuration
 
 Copy [`examples/agy-bridge.json`](examples/agy-bridge.json) to either:
@@ -154,6 +193,9 @@ AGY_BRIDGE_HARD_TIMEOUT_MS
 AGY_BRIDGE_SANITIZE_ACCOUNT_ENV
 AGY_BRIDGE_REJECT_AGY_TOOLS
 AGY_BRIDGE_ENABLE_DELEGATE
+AGY_BRIDGE_ENABLE_IMAGES
+AGY_BRIDGE_MAX_IMAGES
+AGY_BRIDGE_MAX_IMAGE_BYTES
 AGY_BRIDGE_DISCOVER_MODELS
 AGY_BRIDGE_INCLUDE_NON_GEMINI
 AGY_BRIDGE_PASSTHROUGH_ENV
@@ -181,6 +223,8 @@ Delegate mode does **not** make Antigravity tools appear as OMP-native tool card
 
 ```bash
 npm test
+npm run check:source
+npm check
 npm run doctor
 npm run install-agent -- --force
 npm install
@@ -196,5 +240,5 @@ npm run typecheck
 - [SECURITY.md](SECURITY.md) — credentials, permissions, and fail-closed rules.
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — diagnosis by symptom.
 - [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md) — unavoidable CLI-boundary gaps.
-- [VALIDATION.md](VALIDATION.md) — checks actually run for this ZIP.
+- [VALIDATION.md](VALIDATION.md) — validation record and live-check requirements.
 - [GPT_SPARK_EXECUTION_PROMPT.md](GPT_SPARK_EXECUTION_PROMPT.md) — paste-ready implementation prompt.
