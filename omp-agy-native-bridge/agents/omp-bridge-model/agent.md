@@ -6,9 +6,12 @@ mainAgent: true
 subagent: false
 model: inherit
 commandExecutionPolicy: off
+inheritCustomizations: false
+inherit_user: false
 mcpServers: []
 skills: []
 plugins: []
+rules: []
 ---
 
 # OMP model bridge
