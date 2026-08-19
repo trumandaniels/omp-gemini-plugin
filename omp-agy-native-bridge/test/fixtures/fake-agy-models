@@ -27,6 +27,17 @@ if (machineReadable) {
   process.exit(0);
 }
 
+if (process.env.FAKE_AGY_MODELS_PLAIN_FAIL === "1") {
+  console.error(
+    'Eligibility check failed: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist": tls: failed to verify certificate: x509: certificate signed by unknown authority',
+  );
+  process.exit(4);
+}
+if (process.env.FAKE_AGY_MODELS_PLAIN_EMPTY === "1") {
+  console.log("Available models");
+  process.exit(0);
+}
+
 console.log("Available models");
 console.log("* gemini-3.1-pro-low");
 console.log("  gemini-3.1-pro-high");
