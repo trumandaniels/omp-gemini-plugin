@@ -1,10 +1,10 @@
 import type { AgyStreamEvent } from "../types.ts";
 
 /**
- * Parse one documented AGY stream-json event. Unknown future event names are
- * ignored for forward compatibility; malformed payloads for the three events
- * the bridge relies on remain hard failures, and runner.ts still requires one
- * successful terminal `result` event.
+ * Parse one documented AGY stream-json event. Provider mode is a privilege
+ * boundary, so unknown top-level event names fail closed: a future AGY tool or
+ * subagent event must not be silently ignored before the bridge understands
+ * its semantics. Malformed payloads for documented events are also rejected.
  */
 export function parseAgyEventLine(line: string): AgyStreamEvent | undefined {
   const trimmed = line.trim();
@@ -25,7 +25,7 @@ export function parseAgyEventLine(line: string): AgyStreamEvent | undefined {
     throw new Error("agy NDJSON event must contain a non-empty string event name");
   }
   if (event.event !== "init" && event.event !== "step_update" && event.event !== "result") {
-    return undefined;
+    throw new Error(`Unknown agy stream event: ${event.event}`);
   }
   if (event.event === "init" && (!event.init || typeof event.init !== "object" || Array.isArray(event.init))) {
     throw new Error("agy init event is missing init payload");
