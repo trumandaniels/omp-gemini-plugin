@@ -13,9 +13,10 @@ import {
 } from "@oh-my-pi/pi-ai";
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
-import { runAgy } from "./agy/runner.ts";
+import { AgyRunError, runAgy } from "./agy/runner.ts";
 import {
   assertProviderHarnessIsToolless,
+  retryableFailedProviderControlToolNames,
   retryableProviderControlToolNames,
   type ProviderHarnessGuardOptions,
 } from "./harness-guard.ts";
@@ -140,7 +141,9 @@ export function createAgyProviderStream(
       let stagedImages: StagedBridgeImages | undefined;
       try {
         release = await semaphore.acquire(options?.signal);
-        const requestCwd = (options as SimpleStreamOptions & { cwd?: string } | undefined)?.cwd ?? cwd;
+        // `cwd` is a documented OMP StreamOptions field. Child task/worktree
+        // sessions can therefore stage media and launch AGY in their own scope.
+        const requestCwd = options?.cwd ?? cwd;
         const selected = bridgeModel(config, model.id);
         if (!selected) {
           throw new Error(`official-agy model is not registered: ${model.id}`);
@@ -195,23 +198,57 @@ export function createAgyProviderStream(
           signal: options?.signal,
         });
 
-        let result = await invoke(promptResult.prompt);
-        let totalUsage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
+        let result: Awaited<ReturnType<typeof runAgy>> | undefined;
+        let totalUsage = emptyUsage();
+        let attemptPrompt = promptResult.prompt;
 
-        if (config.rejectAgyToolUseInProviderMode) {
-          const retryTools = result.subagents.length === 0
-            ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
-            : undefined;
-          if (retryTools) {
-            const retryPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
-            const retryResult = await invoke(retryPrompt);
+        // At most one corrective retry. The only recoverable AGY harness
+        // actions are side-effect-free list/status probes or a send_message
+        // explicitly rejected because its recipient did not exist.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const candidate = await invoke(attemptPrompt);
             totalUsage = addUsage(
               totalUsage,
-              mapUsage(retryResult.terminal.usage as Record<string, unknown> | undefined),
+              mapUsage(candidate.terminal.usage as Record<string, unknown> | undefined),
             );
-            result = retryResult;
+
+            if (config.rejectAgyToolUseInProviderMode) {
+              const retryTools = candidate.subagents.length === 0
+                ? retryableProviderControlToolNames(candidate.toolSteps, guardOptions)
+                : undefined;
+              if (attempt === 0 && retryTools) {
+                attemptPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
+                continue;
+              }
+              assertProviderHarnessIsToolless(candidate, config.agentName, guardOptions);
+            }
+
+            result = candidate;
+            break;
+          } catch (error) {
+            if (error instanceof AgyRunError) {
+              totalUsage = addUsage(
+                totalUsage,
+                mapUsage(error.terminal?.usage as Record<string, unknown> | undefined),
+              );
+            }
+
+            const retryTools = config.rejectAgyToolUseInProviderMode
+              && attempt === 0
+              && error instanceof AgyRunError
+              ? retryableFailedProviderControlToolNames(error, guardOptions)
+              : undefined;
+            if (retryTools) {
+              attemptPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
+              continue;
+            }
+            throw error;
           }
-          assertProviderHarnessIsToolless(result, config.agentName, guardOptions);
+        }
+
+        if (!result) {
+          throw new Error("official-agy corrective retry ended without a settled provider result");
         }
 
         const output = unwrapNestedBridgeOutput(
