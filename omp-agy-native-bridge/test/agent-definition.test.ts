@@ -41,15 +41,18 @@ test("bundled provider agent routes named subagents and schedules through OMP on
   ]) {
     assert.match(source, new RegExp(`\\b${tool}\\b`));
   }
-  assert.match(source, /An OMP tool may be named `hub`/);
+  assert.match(source, /An OMP tool may be named `hub` or `read`/);
   assert.match(source, /request it only through terminal structured output/);
 });
 
-test("bundled provider agent never treats OMP as an AGY recipient", async () => {
+test("bundled provider agent never treats OMP or OMP tool names as AGY recipients", async () => {
   const source = await readFile(agentPath, "utf8");
   assert.match(source, /OMP is the host application and tool dispatcher/);
   assert.match(source, /not an Antigravity agent, recipient, inbox, conversation peer, or addressable name/);
   assert.match(source, /Never send a message to a recipient named `omp`, `parent`, or `main`/);
+  assert.match(source, /Every tool name supplied by OMP is a structured tool name, not an Antigravity recipient/);
+  assert.match(source, /Names such as `read`, `glob`, `grep`, `bash`, `edit`, `write`, `task`, `hub`, and `inspect_image`/);
+  assert.match(source, /Never call Antigravity `send_message` or `manage_inbox` with an OMP tool name as the recipient/);
   assert.match(source, /enforced terminal structured output is already the return channel/);
   assert.match(source, /place the answer in `text`, or request OMP tools in `tool_calls`/);
 });
