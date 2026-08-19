@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_CONFIG } from "../src/config.ts";
-import { buildProviderPrompt } from "../src/prompt.ts";
+import { appendProviderHarnessRetryInstruction, buildProviderPrompt } from "../src/prompt.ts";
 
 test("provider prompt tells agy to request OMP task instead of native subagents", () => {
   const result = buildProviderPrompt(
@@ -63,6 +63,19 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   }
   assert.match(result.prompt, /If that schema exposes a "name" field/);
   assert.match(result.prompt, /"name": \{/);
+});
+
+test("provider retry correction discards AGY list probes and insists on OMP semantics", () => {
+  const corrected = appendProviderHarnessRetryInstruction(
+    "ORIGINAL PROMPT",
+    ["manage_task", "manage_subagents", "manage_task"],
+  );
+  assert.match(corrected, /^ORIGINAL PROMPT/);
+  assert.match(corrected, /manage_subagents, manage_task/);
+  assert.match(corrected, /previous attempt was discarded/i);
+  assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
+  assert.match(corrected, /informational OMP question, answer directly with no tool call/);
+  assert.match(corrected, /return only an OMP "task" tool call/);
 });
 
 test("provider prompt maps staged OMP images to AGY prompt-media mentions", () => {
