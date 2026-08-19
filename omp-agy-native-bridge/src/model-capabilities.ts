@@ -1,5 +1,7 @@
 import type { BridgeModelDefinition } from "./types.ts";
 
+export type BridgeModelInput = Array<"text" | "image">;
+
 function isGeminiModelId(value: string | undefined): boolean {
   return typeof value === "string" && value.toLowerCase().startsWith("gemini-");
 }
@@ -19,4 +21,11 @@ export function bridgeModelSupportsImages(model: BridgeModelDefinition): boolean
   if (model.id === "auto") return false;
   if (isGeminiModelId(model.id) || isGeminiModelId(model.agyModelId)) return true;
   return Object.values(model.agyModelIdsByEffort ?? {}).some(isGeminiModelId);
+}
+
+/** Produce the exact OMP model-input metadata used by provider registration. */
+export function bridgeModelInput(model: BridgeModelDefinition, imageTransportEnabled: boolean): BridgeModelInput {
+  return imageTransportEnabled && bridgeModelSupportsImages(model)
+    ? ["text", "image"]
+    : ["text"];
 }
