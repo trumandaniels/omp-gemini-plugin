@@ -58,12 +58,13 @@ Changes under test:
 - MCP servers, skills, plugins, rules, shell execution, and subagent invocation are explicitly disabled;
 - the doctor compares the installed agent file with the bundled definition instead of checking existence alone;
 - the runtime guard names unexpected tools and collapses repeated `ACTIVE`/`DONE` updates for the same invocation;
-- the runtime still fails closed rather than permitting Antigravity workspace tools.
+- only read-only AGY operations targeting an exact staged image file, or its private staging directory, are accepted as media hydration;
+- reads outside staged media, writes, commands, searches, MCP calls, and subagents still fail closed.
 
-A focused Node 22 test run covering the new agent-definition, stale-file, lifecycle-deduplication, and error-diagnostic helpers completed with:
+A focused Node 22 test run covering the new agent-definition, stale-file, lifecycle-deduplication, exact-media-read, out-of-scope-read, write-rejection, subagent-rejection, and error-diagnostic helpers completed with:
 
 ```text
-6 passed
+11 passed
 0 failed
 ```
 
@@ -114,12 +115,13 @@ Acceptance criteria:
 - `doctor` reports `PASS tool-less bridge agent contents`;
 - a plain provider request emits no AGY tool or subagent steps;
 - an OMP repository task is returned as an OMP-native tool call rather than executed inside AGY;
-- if AGY still invokes a tool, the error identifies the unique tool name(s) and lifecycle-update count;
+- an image turn may hydrate only its exact `.omp-agy-media-*` attachment files through a read-only AGY operation;
+- any other AGY operation is rejected with unique tool name(s) and lifecycle-update count;
 - `rejectAgyToolUseInProviderMode` remains enabled.
 
 ## Live acceptance required for image input
 
-Unit tests validate the bridge-controlled mechanics: capability registration, decoding, staging, prompt construction, limits, and cleanup. They do not prove that a particular authenticated AGY build resolves `@file` media mentions in print mode.
+Unit tests validate the bridge-controlled mechanics: capability registration, decoding, staging, prompt construction, limits, cleanup, and exact staged-media tool scoping. They do not prove that a particular authenticated AGY build resolves `@file` media mentions in print mode.
 
 Run these checks in the same environment where OMP runs:
 
@@ -157,6 +159,7 @@ Acceptance criteria:
 - no raw base64 appears in prompts or rendered output;
 - `.omp-agy-media-*` is removed after success, provider error, and cancellation;
 - unsupported or oversized image inputs fail before AGY launch;
+- no AGY tool may access anything outside the exact staged-media files;
 - OMP tools and permissions remain authoritative.
 
 ## Other live checks not performed here
@@ -174,4 +177,4 @@ The following still require the user's machine and account:
 
 ## Status statement
 
-The repository contains tested bridge-controlled parser, image-staging, stale-agent detection, and harness-diagnostic mechanics. Live compatibility with the user's authenticated AGY build, exact OMP installation, and account-selected model remains an acceptance requirement rather than an assumed fact.
+The repository contains tested bridge-controlled parser, image-staging, stale-agent detection, narrowly scoped media hydration, and harness-diagnostic mechanics. Live compatibility with the user's authenticated AGY build, exact OMP installation, and account-selected model remains an acceptance requirement rather than an assumed fact.
