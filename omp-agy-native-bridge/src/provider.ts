@@ -14,6 +14,8 @@ import {
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
 import { runAgy } from "./agy/runner.ts";
+import { hasBridgeImages, stageBridgeImages, type StagedBridgeImages } from "./media.ts";
+import { bridgeModelSupportsImages } from "./model-capabilities.ts";
 import { buildProviderPrompt } from "./prompt.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
@@ -112,15 +114,34 @@ export function createAgyProviderStream(
 
     void (async () => {
       let release: (() => void) | undefined;
+      let stagedImages: StagedBridgeImages | undefined;
       try {
         release = await semaphore.acquire(options?.signal);
         const requestCwd = (options as SimpleStreamOptions & { cwd?: string } | undefined)?.cwd ?? cwd;
-        const promptResult = buildProviderPrompt(context, config);
-        const schema = buildBridgeOutputSchema(promptResult.toolNames);
         const selected = bridgeModel(config, model.id);
         if (!selected) {
           throw new Error(`official-agy model is not registered: ${model.id}`);
         }
+
+        if (hasBridgeImages(context)) {
+          if (!config.enableImageInput) {
+            throw new Error(
+              "official-agy image input is disabled. Set enableImageInput=true or AGY_BRIDGE_ENABLE_IMAGES=true.",
+            );
+          }
+          if (!bridgeModelSupportsImages(selected)) {
+            throw new Error(
+              `official-agy/${selected.id} is not configured for image input. Select an explicit Gemini logical model or set models[].capabilities.image=true in agy-bridge.json.`,
+            );
+          }
+          stagedImages = await stageBridgeImages(context, requestCwd, {
+            maxImageCount: config.maxImageCount,
+            maxImageBytes: config.maxImageBytes,
+          });
+        }
+
+        const promptResult = buildProviderPrompt(context, config, stagedImages?.attachments ?? []);
+        const schema = buildBridgeOutputSchema(promptResult.toolNames);
         const resolved = resolveAgyModelSelection(
           selected,
           {
@@ -182,6 +203,11 @@ export function createAgyProviderStream(
           error: message,
         });
       } finally {
+        try {
+          await stagedImages?.cleanup();
+        } catch {
+          // Temporary-media cleanup must never replace the provider result/error.
+        }
         release?.();
       }
     })();
