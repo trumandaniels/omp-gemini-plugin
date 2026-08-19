@@ -246,39 +246,47 @@ export async function runDoctor(
   }
 
   if (options.live && version.code === 0 && agentListed && agentCurrent !== false) {
-    try {
-      const result = await runAgy({
-        prompt:
-          'Return exactly this structured response: {"text":"READY","tool_calls":[],"finish_reason":"stop"}. Do not use tools.',
-        cwd,
-        binary: config.agyBinary,
-        agent: config.agentName,
-        printTimeout: "2m",
-        hardTimeoutMs: 150_000,
-        sandbox: config.sandbox,
-        maxPromptBytes: config.maxPromptBytes,
-        maxStderrBytes: config.maxStderrBytes,
-        killGraceMs: config.killGraceMs,
-        sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
-        schema: buildBridgeOutputSchema([]),
-      });
-      const output = parseAgyTerminalOutput(result.terminal, []);
-      const safeHarness = providerHarnessSnapshotsComplete(result)
-        && (result.toolStepCount ?? result.toolSteps.length) === 0
-        && (result.subagentCount ?? result.subagents.length) === 0;
-      checks.push({
-        name: "live provider transport",
-        ok: output.text.trim() === "READY" && safeHarness,
-        detail: safeHarness
-          ? `structured output=${JSON.stringify(output)}`
-          : `unexpected or incompletely captured inner harness activity: ${providerHarnessActivitySummary(result)}`,
-      });
-    } catch (error) {
+    if (!models?.ok) {
       checks.push({
         name: "live provider transport",
         ok: false,
-        detail: error instanceof Error ? error.message : String(error),
+        detail: "skipped because agy model discovery failed; resolve the account/transport failure above before launching another AGY bootstrap request",
       });
+    } else {
+      try {
+        const result = await runAgy({
+          prompt:
+            'Return exactly this structured response: {"text":"READY","tool_calls":[],"finish_reason":"stop"}. Do not use tools.',
+          cwd,
+          binary: config.agyBinary,
+          agent: config.agentName,
+          printTimeout: "2m",
+          hardTimeoutMs: 150_000,
+          sandbox: config.sandbox,
+          maxPromptBytes: config.maxPromptBytes,
+          maxStderrBytes: config.maxStderrBytes,
+          killGraceMs: config.killGraceMs,
+          sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
+          schema: buildBridgeOutputSchema([]),
+        });
+        const output = parseAgyTerminalOutput(result.terminal, []);
+        const safeHarness = providerHarnessSnapshotsComplete(result)
+          && (result.toolStepCount ?? result.toolSteps.length) === 0
+          && (result.subagentCount ?? result.subagents.length) === 0;
+        checks.push({
+          name: "live provider transport",
+          ok: output.text.trim() === "READY" && safeHarness,
+          detail: safeHarness
+            ? `structured output=${JSON.stringify(output)}`
+            : `unexpected or incompletely captured inner harness activity: ${providerHarnessActivitySummary(result)}`,
+        });
+      } catch (error) {
+        checks.push({
+          name: "live provider transport",
+          ok: false,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
