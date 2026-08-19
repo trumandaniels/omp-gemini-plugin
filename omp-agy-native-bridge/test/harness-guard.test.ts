@@ -102,8 +102,8 @@ test("retryableFailedProviderControlToolNames accepts a rejected send_message wi
   );
 });
 
-test("retryableFailedProviderControlToolNames supports old AGY errors without tool lifecycle events", () => {
-  assert.deepEqual(
+test("retryableFailedProviderControlToolNames rejects missing tool lifecycle evidence", () => {
+  assert.equal(
     retryableFailedProviderControlToolNames({
       message: "agy failed",
       status: "ERROR",
@@ -111,7 +111,7 @@ test("retryableFailedProviderControlToolNames supports old AGY errors without to
       toolSteps: [],
       subagents: [],
     }),
-    ["send_message"],
+    undefined,
   );
 });
 
