@@ -17,11 +17,11 @@ That baseline reported:
 - a contract-level TypeScript check against temporary OMP declarations passed;
 - `npm pack --dry-run --json` passed.
 
-Those numbers describe the original baseline. They must not be presented as the current branch's full-suite result after later parser and image-transport changes.
+Those numbers describe the original baseline. They must not be presented as the current branch's full-suite result after later parser, image-transport, or harness-isolation changes.
 
 ## Current parser and image-transport changes
 
-The current change set adds regression coverage for:
+The current code includes regression coverage for:
 
 - concatenated AGY bridge objects;
 - truncated completion chatter after a valid first object;
@@ -40,17 +40,40 @@ The current change set adds regression coverage for:
 - AGY `@file` prompt-media mapping;
 - bridge configuration validation for image capability fields.
 
-A focused standalone harness for the new image-capability, staging, cleanup, serialization, and prompt-mapping helpers completed with:
+A focused standalone harness for the image-capability, staging, cleanup, serialization, and prompt-mapping helpers completed with:
 
 ```text
 10 passed
 0 failed
 ```
 
-The exact repository tests representing these cases are under:
+## Current provider-harness isolation changes
+
+The current branch additionally covers the reported fail-closed error where AGY emitted tool steps despite provider mode selecting the tool-less bridge agent.
+
+Changes under test:
+
+- the bundled markdown agent explicitly disables `inheritCustomizations`;
+- legacy `inherit_user` and `inheritMcp` opt-outs remain for compatibility;
+- MCP servers, skills, plugins, rules, shell execution, and subagent invocation are explicitly disabled;
+- the doctor compares the installed agent file with the bundled definition instead of checking existence alone;
+- the runtime guard names unexpected tools and collapses repeated `ACTIVE`/`DONE` updates for the same invocation;
+- the runtime still fails closed rather than permitting Antigravity workspace tools.
+
+A focused Node 22 test run covering the new agent-definition, stale-file, lifecycle-deduplication, and error-diagnostic helpers completed with:
 
 ```text
+6 passed
+0 failed
+```
+
+The exact repository tests representing the current parser, media, and isolation cases include:
+
+```text
+test/agent-definition.test.ts
+test/agent-install.test.ts
 test/config.test.ts
+test/harness-guard.test.ts
 test/media.test.ts
 test/messages.test.ts
 test/model-capabilities.test.ts
@@ -71,7 +94,28 @@ npm run typecheck
 npm pack --dry-run --json
 ```
 
-The GitHub connector environment used to publish this branch cannot clone the repository or install dependencies, so it did **not** rerun the complete repository suite or exact peer-package typecheck after the image changes. Do not replace this statement with a claimed full pass until the commands above have actually completed against the branch.
+The GitHub connector environment used to publish this branch cannot clone the repository or install its exact peer dependencies, so it did **not** rerun the complete repository suite or exact-package typecheck after the harness-isolation changes. Do not replace this statement with a claimed full pass until the commands above have actually completed against the branch.
+
+## Live acceptance required for provider isolation
+
+On the same machine and account used by OMP:
+
+```bash
+git pull
+cd omp-agy-native-bridge
+npm run install-agent -- --force
+npm run doctor:live
+```
+
+Then fully terminate all OMP and AGY processes and start a new OMP session.
+
+Acceptance criteria:
+
+- `doctor` reports `PASS tool-less bridge agent contents`;
+- a plain provider request emits no AGY tool or subagent steps;
+- an OMP repository task is returned as an OMP-native tool call rather than executed inside AGY;
+- if AGY still invokes a tool, the error identifies the unique tool name(s) and lifecycle-update count;
+- `rejectAgyToolUseInProviderMode` remains enabled.
 
 ## Live acceptance required for image input
 
@@ -130,4 +174,4 @@ The following still require the user's machine and account:
 
 ## Status statement
 
-The repository contains a tested prototype of the bridge-controlled parser and image-staging mechanics. Live compatibility with the user's authenticated AGY build, exact OMP installation, and account-selected model remains an acceptance requirement rather than an assumed fact.
+The repository contains tested bridge-controlled parser, image-staging, stale-agent detection, and harness-diagnostic mechanics. Live compatibility with the user's authenticated AGY build, exact OMP installation, and account-selected model remains an acceptance requirement rather than an assumed fact.
