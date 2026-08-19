@@ -21,7 +21,7 @@ The previous attempt was discarded because it invoked forbidden Antigravity cont
 - Do not invoke any Antigravity tool on this retry.
 - In particular, never send a message to a recipient named "omp", "parent", "user", or any invented coordinator. OMP tool results are already present in the serialized conversation.
 - Answer from the supplied OMP system prompt, OMP conversation, and OMP tool catalog only.
-- After an OMP tool result, either answer the user or request another OMP tool through structured output.
+- After an OMP tool result, either answer the user or request another OMP tool call through structured output.
 - If a glob/read result was truncated, request a narrower OMP glob/read call; do not use AGY messaging to report or continue it.
 - Unqualified task, agent, subagent, and named-subagent requests are OMP requests.
 - For an informational OMP question, answer directly with no tool call.
