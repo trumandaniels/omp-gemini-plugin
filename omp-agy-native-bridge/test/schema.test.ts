@@ -98,6 +98,74 @@ test("parseAgyTerminalOutput parses JSON response when structured_output is abse
   assert.equal(parsed.tool_calls.length, 0);
 });
 
+test("parseAgyTerminalOutput keeps the first result when agy concatenates completion objects", () => {
+  const response = [
+    {
+      text: "Test acknowledged. Ready for instructions.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+    {
+      text: "Task complete. Ready for next instructions.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+    {
+      text: "Task complete.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+    {
+      text: "Completed.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+  ].map((value) => JSON.stringify(value)).join("\n");
+
+  assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
+    text: "Test acknowledged. Ready for instructions.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
+test("parseAgyTerminalOutput preserves a first tool call before concatenated completion chatter", () => {
+  const response = [
+    {
+      text: 'Read the "{draft}" file.',
+      tool_calls: [
+        {
+          name: "read",
+          arguments: {
+            path: "notes/{draft}.md",
+            selection: { lines: [1, 2] },
+          },
+        },
+      ],
+      finish_reason: "tool_use",
+    },
+    {
+      text: "Completed.",
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+  ].map((value) => JSON.stringify(value)).join("\n\n");
+
+  assert.deepEqual(parseAgyTerminalOutput({ response }, ["read"]), {
+    text: 'Read the "{draft}" file.',
+    tool_calls: [
+      {
+        name: "read",
+        arguments: {
+          path: "notes/{draft}.md",
+          selection: { lines: [1, 2] },
+        },
+      },
+    ],
+    finish_reason: "tool_use",
+  });
+});
+
 test("parseAgyTerminalOutput unwraps fenced JSON in response", () => {
   const parsed = parseAgyTerminalOutput(
     {
@@ -117,6 +185,15 @@ test("parseAgyTerminalOutput falls back to plain text response", () => {
   );
   assert.deepEqual(parsed, {
     text: "plain provider response",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
+test("parseAgyTerminalOutput does not swallow prose around a JSON object", () => {
+  const response = 'prefix\n{"text":"json","tool_calls":[],"finish_reason":"stop"}\nsuffix';
+  assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
+    text: response,
     tool_calls: [],
     finish_reason: "stop",
   });
