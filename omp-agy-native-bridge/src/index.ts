@@ -69,7 +69,7 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
   pi.registerCommand("agy-doctor", {
     description: "Check the official agy binary, model list, and bridge custom agent.",
     handler: async (_args, ctx) => {
-      const report = await runDoctor(config, ctx.cwd);
+      const report = await runDoctor(config, ctx.cwd, { expectedAgentPath: bundledAgent });
       ctx.ui.notify(report.summary, report.ok ? "info" : "error");
     },
   });
