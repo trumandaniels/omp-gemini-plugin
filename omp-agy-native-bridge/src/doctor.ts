@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
-import { globalAgentPath } from "./agent-install.ts";
+import { agentFilesMatch, globalAgentPath } from "./agent-install.ts";
 import { runAgy } from "./agy/runner.ts";
+import { providerHarnessActivitySummary } from "./harness-guard.ts";
 import { parseAgyModelsOutput } from "./model-discovery.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
@@ -62,7 +63,7 @@ async function capture(
 export async function runDoctor(
   config: BridgeConfig,
   cwd = process.cwd(),
-  options: { live?: boolean } = {},
+  options: { live?: boolean; expectedAgentPath?: string } = {},
 ): Promise<DoctorReport> {
   const checks: DoctorReport["checks"] = [];
   const version = await capture(config.agyBinary, ["--version"], cwd);
@@ -83,11 +84,24 @@ export async function runDoctor(
   });
 
   const agentPath = globalAgentPath(config.agentName);
+  const agentPresent = existsSync(agentPath);
   checks.push({
     name: "tool-less bridge agent file",
-    ok: existsSync(agentPath),
+    ok: agentPresent,
     detail: agentPath,
   });
+
+  let agentCurrent: boolean | undefined;
+  if (options.expectedAgentPath) {
+    agentCurrent = agentPresent && await agentFilesMatch(options.expectedAgentPath, agentPath);
+    checks.push({
+      name: "tool-less bridge agent contents",
+      ok: agentCurrent,
+      detail: agentCurrent
+        ? "installed agent matches the bundled isolated definition"
+        : "installed agent is stale or customized; run /agy-install-agent (or npm run install-agent -- --force), then fully restart OMP",
+    });
+  }
 
   const agents = version.code === 0 ? await capture(config.agyBinary, ["agents"], cwd) : undefined;
   const agentListed = agents?.code === 0 && agents.stdout.includes(config.agentName);
@@ -116,7 +130,7 @@ export async function runDoctor(
     });
   }
 
-  if (options.live && version.code === 0 && agentListed) {
+  if (options.live && version.code === 0 && agentListed && agentCurrent !== false) {
     try {
       const result = await runAgy({
         prompt:
@@ -140,7 +154,7 @@ export async function runDoctor(
         ok: output.text.trim() === "READY" && safeHarness,
         detail: safeHarness
           ? `structured output=${JSON.stringify(output)}`
-          : `unexpected inner tools=${result.toolSteps.length}, subagents=${result.subagents.length}`,
+          : `unexpected inner harness activity: ${providerHarnessActivitySummary(result)}`,
       });
     } catch (error) {
       checks.push({
