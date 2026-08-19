@@ -18,20 +18,35 @@ const MAX_TOOL_SNAPSHOTS = 500;
 const MAX_SUBAGENT_SNAPSHOTS = 500;
 const MAX_NDJSON_LINE_BYTES = 4 * 1024 * 1024;
 
+export interface AgyRunErrorDetails {
+  stderr?: string;
+  exitCode?: number | null;
+  status?: string;
+  terminal?: AgyRunResult["terminal"];
+  events?: AgyStreamEvent[];
+  toolSteps?: AgyStepUpdateEvent[];
+  subagents?: AgyRunResult["subagents"];
+}
+
 export class AgyRunError extends Error {
   readonly stderr: string;
   readonly exitCode: number | null;
   readonly status?: string;
+  readonly terminal?: AgyRunResult["terminal"];
+  readonly events: AgyStreamEvent[];
+  readonly toolSteps: AgyStepUpdateEvent[];
+  readonly subagents: AgyRunResult["subagents"];
 
-  constructor(
-    message: string,
-    details: { stderr?: string; exitCode?: number | null; status?: string } = {},
-  ) {
+  constructor(message: string, details: AgyRunErrorDetails = {}) {
     super(message);
     this.name = "AgyRunError";
     this.stderr = details.stderr ?? "";
     this.exitCode = details.exitCode ?? null;
     this.status = details.status;
+    this.terminal = details.terminal;
+    this.events = details.events ?? [];
+    this.toolSteps = details.toolSteps ?? [];
+    this.subagents = details.subagents ?? [];
   }
 }
 
@@ -224,46 +239,50 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     if (hardTimer) clearTimeout(hardTimer);
     options.signal?.removeEventListener("abort", onAbort);
 
+    const failureDetails = (overrides: AgyRunErrorDetails = {}): AgyRunErrorDetails => ({
+      stderr,
+      exitCode: exit.code,
+      status: terminal?.status,
+      terminal,
+      events,
+      toolSteps,
+      subagents,
+      ...overrides,
+    });
+
     if (exit.error) {
-      throw new AgyRunError(`Could not start ${options.binary}: ${exit.error.message}`, { stderr });
+      throw new AgyRunError(
+        `Could not start ${options.binary}: ${exit.error.message}`,
+        failureDetails(),
+      );
     }
     if (aborted || options.signal?.aborted) {
-      throw new AgyRunError("agy run was aborted", { stderr, exitCode: exit.code, status: terminal?.status });
+      throw new AgyRunError("agy run was aborted", failureDetails());
     }
     if (hardTimedOut) {
-      throw new AgyRunError(`agy exceeded the host timeout of ${options.hardTimeoutMs} ms`, {
-        stderr,
-        exitCode: exit.code,
-        status: terminal?.status,
-      });
+      throw new AgyRunError(
+        `agy exceeded the host timeout of ${options.hardTimeoutMs} ms`,
+        failureDetails(),
+      );
     }
     if (callbackFailure) {
-      throw new AgyRunError(`agy event callback failed: ${callbackFailure.message}`, {
-        stderr,
-        exitCode: exit.code,
-        status: terminal?.status,
-      });
+      throw new AgyRunError(
+        `agy event callback failed: ${callbackFailure.message}`,
+        failureDetails(),
+      );
     }
     if (parseFailure) {
-      throw new AgyRunError(`Could not parse agy stream: ${parseFailure.message}`, {
-        stderr,
-        exitCode: exit.code,
-        status: terminal?.status,
-      });
+      throw new AgyRunError(
+        `Could not parse agy stream: ${parseFailure.message}`,
+        failureDetails(),
+      );
     }
     if (!terminal) {
-      throw new AgyRunError("agy exited without a terminal result event", {
-        stderr,
-        exitCode: exit.code,
-      });
+      throw new AgyRunError("agy exited without a terminal result event", failureDetails());
     }
     if (exit.code !== 0 || terminal.status !== "SUCCESS") {
       const diagnostic = terminal.error || stderr.trim() || `status=${String(terminal.status)}`;
-      throw new AgyRunError(`agy failed: ${diagnostic}`, {
-        stderr,
-        exitCode: exit.code,
-        status: terminal.status,
-      });
+      throw new AgyRunError(`agy failed: ${diagnostic}`, failureDetails({ status: terminal.status }));
     }
 
     return {
