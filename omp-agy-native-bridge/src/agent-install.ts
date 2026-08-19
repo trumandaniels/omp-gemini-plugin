@@ -7,6 +7,20 @@ export function globalAgentPath(agentName = "omp-bridge-model"): string {
   return join(homedir(), ".gemini", "config", "agents", agentName, "agent.md");
 }
 
+export function agentDefinitionsMatch(expected: string, actual: string): boolean {
+  const normalize = (value: string) => value.replace(/\r\n/g, "\n").trimEnd();
+  return normalize(expected) === normalize(actual);
+}
+
+export async function agentFilesMatch(expectedPath: string, actualPath: string): Promise<boolean> {
+  if (!existsSync(expectedPath) || !existsSync(actualPath)) return false;
+  const [expected, actual] = await Promise.all([
+    readFile(expectedPath, "utf8"),
+    readFile(actualPath, "utf8"),
+  ]);
+  return agentDefinitionsMatch(expected, actual);
+}
+
 export async function installAgentFile(
   sourcePath: string,
   agentName = "omp-bridge-model",
@@ -19,7 +33,7 @@ export async function installAgentFile(
       readFile(destination, "utf8"),
       readFile(sourcePath, "utf8"),
     ]);
-    if (existing === source) return destination;
+    if (agentDefinitionsMatch(source, existing)) return destination;
     throw new Error(`Agent already exists with different contents: ${destination}. Re-run with --force after reviewing it.`);
   }
   if (force) {

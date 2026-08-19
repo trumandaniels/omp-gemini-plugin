@@ -14,6 +14,7 @@ import {
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
 import { runAgy } from "./agy/runner.ts";
+import { assertProviderHarnessIsToolless } from "./harness-guard.ts";
 import { hasBridgeImages, stageBridgeImages, type StagedBridgeImages } from "./media.ts";
 import { bridgeModelSupportsImages } from "./model-capabilities.ts";
 import { buildProviderPrompt } from "./prompt.ts";
@@ -169,10 +170,11 @@ export function createAgyProviderStream(
           signal: options?.signal,
         });
 
-        if (config.rejectAgyToolUseInProviderMode && (result.toolSteps.length > 0 || result.subagents.length > 0)) {
-          throw new Error(
-            `Provider-mode agy unexpectedly used its own harness (${result.toolSteps.length} tool step(s), ${result.subagents.length} subagent(s)). Reinstall the tool-less ${config.agentName} custom agent and retry.`,
-          );
+        if (config.rejectAgyToolUseInProviderMode) {
+          assertProviderHarnessIsToolless(result, config.agentName, {
+            cwd: requestCwd,
+            allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
+          });
         }
 
         const output = unwrapNestedBridgeOutput(

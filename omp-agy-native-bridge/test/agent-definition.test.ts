@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import test from "node:test";
+
+const agentPath = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
+
+test("bundled provider agent opts out of all user customizations", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /^tools:\s*\[\]\s*$/m);
+  assert.match(source, /^subagent:\s*false\s*$/m);
+  assert.match(source, /^commandExecutionPolicy:\s*off\s*$/m);
+  assert.match(source, /^inheritCustomizations:\s*false\s*$/m);
+  assert.match(source, /^inherit_user:\s*false\s*$/m);
+  assert.match(source, /^inheritMcp:\s*false\s*$/m);
+  assert.match(source, /^mcpServers:\s*\[\]\s*$/m);
+  assert.match(source, /^skills:\s*\[\]\s*$/m);
+  assert.match(source, /^plugins:\s*\[\]\s*$/m);
+  assert.match(source, /^rules:\s*\[\]\s*$/m);
+});
