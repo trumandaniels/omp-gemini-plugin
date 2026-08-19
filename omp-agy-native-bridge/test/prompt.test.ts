@@ -79,6 +79,30 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   assert.match(result.prompt, /"name": \{/);
 });
 
+test("provider prompt separates OMP tools, OMP subagent concepts, and AGY recipients", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["Use OMP facilities only."],
+      messages: [{ role: "user", content: "Have a subagent audit the UI", timestamp: 1 }],
+      tools: [
+        {
+          name: "task",
+          description: "Run OMP subagents",
+          parameters: { type: "object", properties: { task: { type: "string" } } },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /Keep three namespaces completely separate/);
+  assert.match(result.prompt, /OMP orchestration concepts: agent, subagent, named subagent, worker, reviewer/);
+  assert.match(result.prompt, /The literal recipient "subagent" is always wrong in provider mode/);
+  assert.match(result.prompt, /"Subagent" is an OMP orchestration concept, not an address/);
+  assert.match(result.prompt, /There is no generic recipient named "subagent"/);
+  assert.match(result.prompt, /request OMP "task" according to its current schema/);
+});
+
 test("provider prompt treats OMP tool names as structured calls, never AGY recipients", () => {
   const result = buildProviderPrompt(
     {
@@ -161,7 +185,7 @@ test("provider prompt treats structured output as the return channel after an in
   assert.match(result.prompt, /After OMP supplies a tool result/);
   assert.match(result.prompt, /Do not report back through an Antigravity message tool/);
   assert.match(result.prompt, /OMP is not an Antigravity agent or message recipient/);
-  assert.match(result.prompt, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", or any OMP tool name/);
+  assert.match(result.prompt, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", any OMP tool name/);
   assert.match(result.prompt, /terminal structured response is the return channel to OMP/);
   assert.match(result.prompt, /Treat result warnings such as "truncated", "limit reached", "skipped missing"/);
   assert.match(result.prompt, /more targeted OMP tool calls are required/);
@@ -180,9 +204,11 @@ test("provider retry correction discards AGY probes and insists on structured re
   assert.match(corrected, /manage_task, send_message/);
   assert.match(corrected, /previous attempt was discarded/i);
   assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
+  assert.match(corrected, /Keep these namespaces separate/);
   assert.match(corrected, /OMP tool names such as read, glob, grep, bash/);
+  assert.match(corrected, /literal words "agent", "subagent", "subagents"/);
   assert.match(corrected, /OMP is not an Antigravity message recipient/);
-  assert.match(corrected, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", or any OMP tool name/);
+  assert.match(corrected, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", any OMP tool name/);
   assert.match(corrected, /Put the answer in the outer "text" field/);
   assert.match(corrected, /If an OMP tool result is truncated, limit-reached, skipped, missing, or otherwise incomplete/);
   assert.match(corrected, /informational OMP question, answer directly with no tool call/);
@@ -208,6 +234,16 @@ test("missing-recipient retry correction redirects read to OMP structured tool_c
   assert.match(corrected, /If "read" is an OMP tool name/);
   assert.match(corrected, /outer "tool_calls" array/);
   assert.match(corrected, /Do not call send_message or manage_inbox at all on this retry/);
+});
+
+test("missing-recipient retry correction maps subagent concept to OMP task", () => {
+  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "subagent");
+  assert.match(corrected, /recipient named "subagent"/);
+  assert.match(corrected, /Words such as "agent", "subagent", "subagents", "named subagent"/);
+  assert.match(corrected, /not recipients and not tool names by themselves/);
+  assert.match(corrected, /never send_message to a recipient named "subagent"/);
+  assert.match(corrected, /request the OMP "task" tool when available/);
+  assert.match(corrected, /informational question about subagents, answer directly/);
 });
 
 test("provider prompt maps staged OMP images to AGY prompt-media mentions", () => {
