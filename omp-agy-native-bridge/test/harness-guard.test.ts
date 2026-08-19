@@ -57,7 +57,7 @@ test("provider guard puts the exact AGY control tool before the long diagnostic"
         },
         "omp-bridge-model",
       ),
-    /^Forbidden AGY provider tool\(s\): manage_subagents\./,
+    /^Error: Forbidden AGY provider tool\(s\): manage_subagents\./,
   );
 });
 
