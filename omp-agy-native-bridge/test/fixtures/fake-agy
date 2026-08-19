@@ -31,7 +31,8 @@ if (prompt.includes("FAKE:CHILD")) {
   continueForever();
 }
 
-const correctedMissingRecipient = prompt.includes("no such Antigravity recipient exists");
+const correctedMissingRecipient = prompt.includes("no such Antigravity recipient exists")
+  || prompt.includes("Provider mode does not use Antigravity messaging for OMP actions");
 const structured = {
   text: prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && correctedMissingRecipient
     ? "recovered without AGY messaging"
