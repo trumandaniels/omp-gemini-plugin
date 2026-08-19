@@ -1,6 +1,7 @@
 import { AgyRunError } from "./agy/runner.ts";
 import {
   assertProviderHarnessIsToolless,
+  providerHarnessSnapshotsComplete,
   retryableProviderControlToolNames,
   uniqueAgyToolSteps,
   type ProviderHarnessGuardOptions,
@@ -25,14 +26,15 @@ function toolStepName(result: AgyRunResult["toolSteps"][number]): string {
 
 /**
  * Classify only the exact, side-effect-free AGY routing failure observed when
- * the model mistakes OMP for an Antigravity message recipient. Any subagent or
- * unrelated tool activity keeps the failure closed.
+ * the model mistakes OMP for an Antigravity message recipient. Any subagent,
+ * unrelated tool, or truncated activity snapshot keeps the failure closed.
  */
 export function isRetryableMissingOmpRecipientError(error: unknown): error is AgyRunError {
   if (!(error instanceof AgyRunError)) return false;
   if (error.terminal?.status !== "ERROR") return false;
   const terminalError = error.terminal.error;
   if (typeof terminalError !== "string" || !MISSING_OMP_RECIPIENT.test(terminalError.trim())) return false;
+  if (!providerHarnessSnapshotsComplete(error)) return false;
   if (error.subagents.length > 0) return false;
 
   const tools = uniqueAgyToolSteps(error.toolSteps);
@@ -58,10 +60,10 @@ export interface ProviderAttemptOutcome {
  * Run at most two AGY processes for one OMP provider turn.
  *
  * A second attempt is allowed only for one of two tightly bounded cases:
- * 1. the exact `recipient "omp" not found` routing error with no AGY subagent or
- *    non-send-message tool activity; or
+ * 1. the exact `recipient "omp" not found` routing error with complete activity
+ *    snapshots and no AGY subagent or non-send-message tool activity; or
  * 2. an otherwise successful read-only AGY control probe already classified by
- *    `retryableProviderControlToolNames`.
+ *    `retryableProviderControlToolNames`, again with complete snapshots.
  *
  * The discarded result/error is never returned to OMP or inserted into history.
  */
@@ -87,7 +89,7 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
 
   if (options.enforceToolless) {
     const guardOptions = options.guardOptions ?? {};
-    const retryTools = result.subagents.length === 0
+    const retryTools = result.subagents.length === 0 && providerHarnessSnapshotsComplete(result)
       ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
       : undefined;
 
