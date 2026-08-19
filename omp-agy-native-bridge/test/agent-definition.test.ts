@@ -19,13 +19,19 @@ test("bundled provider agent opts out of all user customizations", async () => {
   assert.match(source, /^rules:\s*\[\]\s*$/m);
 });
 
-test("bundled provider agent routes named subagents through OMP only", async () => {
+test("bundled provider agent routes named subagents and schedules through OMP only", async () => {
   const source = await readFile(agentPath, "utf8");
-  assert.match(source, /references to agents, subagents, named subagents, tasks, and background jobs mean OMP facilities/);
+  assert.match(
+    source,
+    /references to agents, subagents, named subagents, tasks, background jobs, schedules, reminders, or recurring work mean OMP facilities/,
+  );
   assert.match(source, /Questions about how OMP subagents work are informational/);
   assert.match(source, /request the OMP `task` tool/);
+  assert.match(source, /use an OMP scheduling\/automation tool only when one is present/);
+  assert.match(source, /never call Antigravity `schedule`/);
   assert.match(source, /how to make named subagents\?/);
   for (const tool of [
+    "schedule",
     "manage_task",
     "manage_subagents",
     "manage_inbox",
