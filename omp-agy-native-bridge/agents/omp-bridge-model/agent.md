@@ -8,6 +8,7 @@ model: inherit
 commandExecutionPolicy: off
 inheritCustomizations: false
 inherit_user: false
+inheritMcp: false
 mcpServers: []
 skills: []
 plugins: []
