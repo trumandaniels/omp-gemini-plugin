@@ -1,3 +1,4 @@
+import type { StagedBridgeImage } from "./media.ts";
 import type { BridgeConfig } from "./types.ts";
 
 function jsonSafe(value: unknown): unknown {
@@ -20,21 +21,37 @@ function jsonSafe(value: unknown): unknown {
   }
 }
 
-function normalizeContent(content: unknown): unknown[] {
+function imageKey(messageIndex: number, contentIndex: number): string {
+  return `${messageIndex}:${contentIndex}`;
+}
+
+function normalizeContent(
+  content: unknown,
+  messageIndex: number,
+  images: ReadonlyMap<string, StagedBridgeImage>,
+): unknown[] {
   if (typeof content === "string") return [{ type: "text", text: content }];
   if (!Array.isArray(content)) return [{ type: "text", text: String(content ?? "") }];
 
-  return content.map((block) => {
+  return content.map((block, contentIndex) => {
     if (!block || typeof block !== "object") return { type: "text", text: String(block ?? "") };
     const item = block as Record<string, unknown>;
     switch (item.type) {
       case "text":
         return { type: "text", text: String(item.text ?? "") };
-      case "image":
-        return {
-          type: "image_omitted",
-          mediaType: String(item.mimeType ?? item.mediaType ?? "unknown"),
-        };
+      case "image": {
+        const attachment = images.get(imageKey(messageIndex, contentIndex));
+        return attachment
+          ? {
+              type: "image_attachment",
+              attachmentIndex: attachment.attachmentIndex,
+              mediaType: attachment.mediaType,
+            }
+          : {
+              type: "image_omitted",
+              mediaType: String(item.mimeType ?? item.mediaType ?? "unknown"),
+            };
+      }
       case "thinking":
       case "redactedThinking":
         return { type: "reasoning_omitted" };
@@ -55,7 +72,11 @@ function normalizeContent(content: unknown): unknown[] {
   });
 }
 
-function normalizeMessage(message: unknown): Record<string, unknown> {
+function normalizeMessage(
+  message: unknown,
+  messageIndex: number,
+  images: ReadonlyMap<string, StagedBridgeImage>,
+): Record<string, unknown> {
   if (!message || typeof message !== "object") {
     return { role: "unknown", content: [{ type: "text", text: String(message ?? "") }] };
   }
@@ -67,12 +88,12 @@ function normalizeMessage(message: unknown): Record<string, unknown> {
       toolCallId: String(item.toolCallId ?? ""),
       toolName: String(item.toolName ?? "unknown"),
       isError: Boolean(item.isError),
-      content: normalizeContent(item.content),
+      content: normalizeContent(item.content, messageIndex, images),
     };
   }
   return {
     role,
-    content: normalizeContent(item.content),
+    content: normalizeContent(item.content, messageIndex, images),
     ...(role === "assistant" && typeof item.stopReason === "string"
       ? { stopReason: item.stopReason }
       : {}),
@@ -82,11 +103,15 @@ function normalizeMessage(message: unknown): Record<string, unknown> {
 export function serializeConversation(
   context: { systemPrompt?: readonly string[]; messages?: readonly unknown[] },
   config: Pick<BridgeConfig, "maxHistoryChars">,
+  attachments: readonly StagedBridgeImage[] = [],
 ): string {
+  const images = new Map(
+    attachments.map((attachment) => [imageKey(attachment.messageIndex, attachment.contentIndex), attachment]),
+  );
   const serialized = JSON.stringify(
     {
       systemPrompt: (context.systemPrompt ?? []).map(String),
-      messages: (context.messages ?? []).map(normalizeMessage),
+      messages: (context.messages ?? []).map((message, index) => normalizeMessage(message, index, images)),
     },
     null,
     2,
