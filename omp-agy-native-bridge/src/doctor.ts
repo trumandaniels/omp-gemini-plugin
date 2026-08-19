@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 
 import { agentFilesMatch, globalAgentPath } from "./agent-install.ts";
 import { runAgy } from "./agy/runner.ts";
-import { providerHarnessActivitySummary } from "./harness-guard.ts";
+import {
+  providerHarnessActivitySummary,
+  providerHarnessSnapshotsComplete,
+} from "./harness-guard.ts";
 import { parseAgyModelsOutput } from "./model-discovery.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
@@ -148,13 +151,15 @@ export async function runDoctor(
         schema: buildBridgeOutputSchema([]),
       });
       const output = parseAgyTerminalOutput(result.terminal, []);
-      const safeHarness = result.toolSteps.length === 0 && result.subagents.length === 0;
+      const safeHarness = providerHarnessSnapshotsComplete(result)
+        && (result.toolStepCount ?? result.toolSteps.length) === 0
+        && (result.subagentCount ?? result.subagents.length) === 0;
       checks.push({
         name: "live provider transport",
         ok: output.text.trim() === "READY" && safeHarness,
         detail: safeHarness
           ? `structured output=${JSON.stringify(output)}`
-          : `unexpected inner harness activity: ${providerHarnessActivitySummary(result)}`,
+          : `unexpected or incompletely captured inner harness activity: ${providerHarnessActivitySummary(result)}`,
       });
     } catch (error) {
       checks.push({
