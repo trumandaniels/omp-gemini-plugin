@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   assertProviderHarnessIsToolless,
   providerHarnessActivitySummary,
+  retryableProviderControlToolNames,
   unexpectedProviderHarnessToolSteps,
   uniqueAgyToolSteps,
 } from "../src/harness-guard.ts";
@@ -41,6 +42,46 @@ test("uniqueAgyToolSteps collapses ACTIVE and DONE updates", () => {
     providerHarnessActivitySummary({ toolSteps: updates, subagents: [] }),
     "2 tool invocation(s) from 4 lifecycle update(s) [codesearch, read_file], 0 subagent(s)",
   );
+});
+
+test("provider guard puts the exact AGY control tool before the long diagnostic", () => {
+  assert.throws(
+    () =>
+      assertProviderHarnessIsToolless(
+        {
+          toolSteps: [
+            toolEvent("ACTIVE", 7, "manage_subagents", { Action: "list" }),
+            toolEvent("DONE", 7, "manage_subagents", { Action: "list" }),
+          ],
+          subagents: [],
+        },
+        "omp-bridge-model",
+      ),
+    /^Error: Forbidden AGY provider tool\(s\): manage_subagents\./,
+  );
+});
+
+test("retryableProviderControlToolNames accepts only harmless list and status probes", () => {
+  assert.deepEqual(
+    retryableProviderControlToolNames([
+      toolEvent("ACTIVE", 1, "manage_subagents", { Action: "list" }),
+      toolEvent("DONE", 1, "manage_subagents", { Action: "list" }),
+      toolEvent("DONE", 2, "manage_task", { action: "status", TaskId: "task-1" }),
+    ]),
+    ["manage_subagents", "manage_task"],
+  );
+});
+
+test("retryableProviderControlToolNames rejects mutating AGY control actions", () => {
+  for (const event of [
+    toolEvent("DONE", 1, "manage_subagents", { Action: "kill_all" }),
+    toolEvent("DONE", 1, "manage_task", { Action: "kill", TaskId: "task-1" }),
+    toolEvent("DONE", 1, "manage_task", { Action: "send_input", TaskId: "task-1", Input: "x" }),
+    toolEvent("DONE", 1, "define_subagent", { name: "Worker" }),
+    toolEvent("DONE", 1, "invoke_subagent", { Subagents: [] }),
+  ]) {
+    assert.equal(retryableProviderControlToolNames([event]), undefined);
+  }
 });
 
 test("assertProviderHarnessIsToolless allows duplicate read lifecycle events for an exact staged image", () => {

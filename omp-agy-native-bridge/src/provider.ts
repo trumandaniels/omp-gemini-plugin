@@ -14,10 +14,14 @@ import {
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
 import { runAgy } from "./agy/runner.ts";
-import { assertProviderHarnessIsToolless } from "./harness-guard.ts";
+import {
+  assertProviderHarnessIsToolless,
+  retryableProviderControlToolNames,
+  type ProviderHarnessGuardOptions,
+} from "./harness-guard.ts";
 import { hasBridgeImages, stageBridgeImages, type StagedBridgeImages } from "./media.ts";
 import { bridgeModelSupportsImages } from "./model-capabilities.ts";
-import { buildProviderPrompt } from "./prompt.ts";
+import { appendProviderHarnessRetryInstruction, buildProviderPrompt } from "./prompt.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
@@ -47,6 +51,24 @@ function mapUsage(value: Record<string, unknown> | undefined): Usage {
     totalTokens: Math.max(0, total),
     reasoningTokens: Math.max(0, Number(value?.thinking_tokens ?? 0)),
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  } as Usage;
+}
+
+function addUsage(left: Usage, right: Usage): Usage {
+  return {
+    input: left.input + right.input,
+    output: left.output + right.output,
+    cacheRead: left.cacheRead + right.cacheRead,
+    cacheWrite: left.cacheWrite + right.cacheWrite,
+    totalTokens: left.totalTokens + right.totalTokens,
+    reasoningTokens: (left.reasoningTokens ?? 0) + (right.reasoningTokens ?? 0),
+    cost: {
+      input: left.cost.input + right.cost.input,
+      output: left.cost.output + right.cost.output,
+      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
+      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
+      total: left.cost.total + right.cost.total,
+    },
   } as Usage;
 }
 
@@ -151,9 +173,12 @@ export function createAgyProviderStream(
           },
           config.defaultEffort,
         );
-
-        const result = await runAgy({
-          prompt: promptResult.prompt,
+        const guardOptions: ProviderHarnessGuardOptions = {
+          cwd: requestCwd,
+          allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
+        };
+        const invoke = (prompt: string) => runAgy({
+          prompt,
           cwd: requestCwd,
           binary: config.agyBinary,
           model: resolved.model,
@@ -170,11 +195,23 @@ export function createAgyProviderStream(
           signal: options?.signal,
         });
 
+        let result = await invoke(promptResult.prompt);
+        let totalUsage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
+
         if (config.rejectAgyToolUseInProviderMode) {
-          assertProviderHarnessIsToolless(result, config.agentName, {
-            cwd: requestCwd,
-            allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
-          });
+          const retryTools = result.subagents.length === 0
+            ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
+            : undefined;
+          if (retryTools) {
+            const retryPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
+            const retryResult = await invoke(retryPrompt);
+            totalUsage = addUsage(
+              totalUsage,
+              mapUsage(retryResult.terminal.usage as Record<string, unknown> | undefined),
+            );
+            result = retryResult;
+          }
+          assertProviderHarnessIsToolless(result, config.agentName, guardOptions);
         }
 
         const output = unwrapNestedBridgeOutput(
@@ -185,10 +222,8 @@ export function createAgyProviderStream(
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
 
         message.stopReason = output.tool_calls.length > 0 ? "toolUse" : "stop";
-        message.usage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
-        message.duration = result.terminal.duration_seconds !== undefined
-          ? result.terminal.duration_seconds * 1_000
-          : performance.now() - perfStart;
+        message.usage = totalUsage;
+        message.duration = performance.now() - perfStart;
         stream.push({
           type: "done",
           reason: message.stopReason as "stop" | "toolUse",

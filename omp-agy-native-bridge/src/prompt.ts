@@ -10,6 +10,21 @@ export interface ProviderPromptResult {
   toolCatalog: ReturnType<typeof serializeTools>;
 }
 
+export function appendProviderHarnessRetryInstruction(
+  prompt: string,
+  forbiddenToolNames: readonly string[],
+): string {
+  const names = [...new Set(forbiddenToolNames)].sort().join(", ") || "unknown";
+  return `${prompt}\n\n# Mandatory provider retry correction
+The previous attempt was discarded because it invoked forbidden Antigravity control tool(s): ${names}.
+- Do not use or rely on any result returned by those Antigravity tools.
+- Do not invoke any Antigravity tool on this retry.
+- Answer from the supplied OMP system prompt, OMP conversation, and OMP tool catalog only.
+- Unqualified task, agent, subagent, and named-subagent requests are OMP requests.
+- For an informational OMP question, answer directly with no tool call.
+- If the user requested actual OMP subagent execution, return only an OMP "task" tool call that follows the supplied schema.`;
+}
+
 export function buildProviderPrompt(
   context: { systemPrompt?: readonly string[]; messages?: readonly unknown[]; tools?: readonly ToolLike[] },
   config: BridgeConfig,
@@ -32,8 +47,16 @@ You are the model backend for an Oh My Pi (OMP) agent session. OMP owns the agen
 - Do NOT inspect the workspace through Antigravity. Everything you know about the task is supplied below. The only allowed additional inputs are the explicit temporary prompt-media attachments listed under "OMP image attachments"; inspect those as attached media without invoking file tools.
 - To request an action, return an OMP tool call in terminal structured output. OMP will execute it and call you again with the tool result.
 - Never fabricate a tool result. Never claim a file was read, edited, tested, or verified unless the OMP conversation contains the corresponding result.
-- The OMP tool named "task", when present, is the correct way to request OMP-native subagents. Multiple independent tool calls may be returned in one turn.
 - Return only the object required by the enforced JSON schema. Do not wrap it in Markdown or add commentary outside it.
+
+# OMP versus Antigravity namespace
+- Unless the user explicitly says "Antigravity" or "AGY", unqualified words such as "agent", "subagent", "named subagent", "task", and "background job" refer to OMP facilities, not the Antigravity harness carrying this model call.
+- The following Antigravity control tools are forbidden in provider mode, even for list, status, discovery, or explanation requests: manage_task, manage_subagents, manage_inbox, define_subagent, invoke_subagent, and send_message.
+- Never call an Antigravity control tool to learn how OMP works. The OMP system prompt and the serialized OMP tool catalog below are the authoritative sources.
+- For an informational question about OMP subagents, answer directly from that supplied context without calling any tool.
+- To actually create or run an OMP subagent, return a call to the OMP tool named "task" when it is available. Follow its current schema exactly. If that schema exposes a "name" field, use it for the requested stable named-subagent identifier.
+- Example: for "how to make named subagents?", explain the OMP task tool's naming field directly. Do not call manage_task, manage_subagents, define_subagent, or invoke_subagent.
+- Multiple independent OMP tool calls may be returned in one turn when the current schemas permit them.
 
 # Output contract
 Return exactly these fields:
