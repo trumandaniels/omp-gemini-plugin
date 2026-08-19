@@ -88,7 +88,8 @@ function normalizeBridgeText(value: unknown): string {
   // validated before reaching this fallback.
   if (Array.isArray(value) || isRecord(value)) {
     try {
-      return JSON.stringify(value, null, 2);
+      const encoded = JSON.stringify(value, null, 2);
+      if (encoded !== undefined) return encoded;
     } catch {
       // Fall through to the explicit validation error below.
     }
