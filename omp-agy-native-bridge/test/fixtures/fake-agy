@@ -40,6 +40,10 @@ console.log(
   }),
 );
 
+if (prompt.includes("FAKE:UNKNOWN_EVENT")) {
+  console.log(JSON.stringify({ event: "progress", progress: { message: "future event" } }));
+}
+
 if (prompt.includes("FAKE:TOOL")) {
   console.log(
     JSON.stringify({
@@ -55,6 +59,45 @@ if (prompt.includes("FAKE:TOOL")) {
       },
     }),
   );
+}
+
+if (prompt.includes("FAKE:RECIPIENT_NOT_FOUND")) {
+  for (const state of ["ACTIVE", "DONE"]) {
+    console.log(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "fake-conversation",
+          step_index: 3,
+          state,
+          step_type: "tool",
+          tool_name: "send_message",
+          tool_info: {
+            name: "send_message",
+            parameters: { to: "omp", message: "Continuing after the OMP tool result." },
+            ...(state === "DONE" ? { error: { type: "not_found", message: 'recipient "omp" not found' } } : {}),
+          },
+        },
+      }),
+    );
+  }
+  console.log(
+    JSON.stringify({
+      event: "result",
+      result: {
+        conversation_id: "fake-conversation",
+        status: "ERROR",
+        error: 'recipient "omp" not found',
+        usage: {
+          input_tokens: 7,
+          output_tokens: 2,
+          cache_read_tokens: 0,
+          total_tokens: 9,
+        },
+      },
+    }),
+  );
+  process.exit(1);
 }
 
 if (prompt.includes("FAKE:ERROR")) {
