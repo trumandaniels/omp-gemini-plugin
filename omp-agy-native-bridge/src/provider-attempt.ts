@@ -6,10 +6,12 @@ import {
   unexpectedProviderHarnessToolSteps,
   type ProviderHarnessGuardOptions,
 } from "./harness-guard.ts";
+import { synthesizeMissingRecipientRecovery } from "./missing-recipient-recovery.ts";
 import {
   appendMissingAgyRecipientRetryInstruction,
   appendProviderHarnessRetryInstruction,
 } from "./prompt.ts";
+import type { SerializedTool } from "./schema.ts";
 import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 
 const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|“([^”]+)”|‘([^’]+)’|([a-zA-Z0-9_.-]+))\s+(?:was\s+)?not\s+found\.?$/i;
@@ -168,6 +170,8 @@ export interface ProviderAttemptOptions {
   enforceToolless: boolean;
   agentName: string;
   guardOptions?: ProviderHarnessGuardOptions;
+  /** Exact OMP tool catalog for deterministic recovery of misrouted messages. */
+  ompTools?: readonly SerializedTool[];
 }
 
 export interface ProviderAttemptOutcome {
@@ -180,19 +184,16 @@ export interface ProviderAttemptOutcome {
 /**
  * Run AGY with a tightly bounded provider-mode recovery budget.
  *
- * Most recoveries remain limited to one corrected retry. A third AGY process is
- * allowed only when both the first attempt and its corrected retry fail with an
- * exact, side-effect-free missing-recipient error. That failure proves no
- * message was delivered, so one final, stronger no-AGY-tools correction is safe.
- * No fourth attempt is ever made.
+ * When the failed AGY send is unambiguous, prefer deterministic transport
+ * recovery over another model call: messages addressed to OMP become final text,
+ * while generic subagent-role messages become an OMP `task` tool call using the
+ * exact current task schema. This removes the recurring `recipient "omp"` /
+ * `recipient "subagent"` loop without trusting arbitrary recipient names.
  *
- * Other second-attempt cases are unchanged:
- * 1. an AGY permission-conversion failure for a known forbidden provider-mode
- *    control tool, before that tool executes and with no unrelated activity; or
- * 2. an otherwise successful read-only AGY control probe already classified by
- *    `retryableProviderControlToolNames`, again with complete snapshots.
- *
- * Discarded results/errors are never returned to OMP or inserted into history.
+ * Other missing-recipient failures retain the bounded prompt-retry path. A third
+ * AGY process is allowed only when both the first attempt and its corrected retry
+ * fail with an exact, side-effect-free missing-recipient error. No fourth attempt
+ * is ever made.
  */
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
@@ -202,6 +203,11 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   const invoke = async (prompt: string): Promise<AgyRunResult> => {
     attempts += 1;
     return options.invoke(prompt);
+  };
+
+  const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
+    if (options.ompTools === undefined) return undefined;
+    return synthesizeMissingRecipientRecovery(error, recipient, options.ompTools);
   };
 
   const guardOptions = options.guardOptions ?? {};
@@ -214,17 +220,27 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     const missingRecipient = retryableMissingAgyRecipient(error, guardOptions);
     if (missingRecipient) {
       recordDiscardedUsage(error, discardedUsage);
-      retried = true;
-      const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
-      try {
-        result = await invoke(correctedPrompt);
-      } catch (retryError) {
-        const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
-        if (!repeatedRecipient) throw retryError;
-        recordDiscardedUsage(retryError, discardedUsage);
-        result = await invoke(
-          appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
-        );
+      const synthesized = deterministicRecovery(error, missingRecipient);
+      if (synthesized) {
+        result = synthesized;
+      } else {
+        retried = true;
+        const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
+        try {
+          result = await invoke(correctedPrompt);
+        } catch (retryError) {
+          const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
+          if (!repeatedRecipient) throw retryError;
+          recordDiscardedUsage(retryError, discardedUsage);
+          const synthesizedRetry = deterministicRecovery(retryError, repeatedRecipient);
+          if (synthesizedRetry) {
+            result = synthesizedRetry;
+          } else {
+            result = await invoke(
+              appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
+            );
+          }
+        }
       }
     } else {
       const permissionTool = retryablePermissionConversionTool(error, guardOptions);
