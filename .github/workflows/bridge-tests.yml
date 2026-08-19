@@ -25,3 +25,9 @@ jobs:
         run: npm run check:source
       - name: Run unit and fake-process tests
         run: npm test
+      - name: Install development and peer dependencies
+        run: npm install --no-audit --no-fund
+      - name: Type-check against installed OMP packages
+        run: npm run typecheck
+      - name: Verify package contents
+        run: npm pack --dry-run --json
