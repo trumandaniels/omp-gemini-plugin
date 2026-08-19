@@ -9,7 +9,7 @@ test("mapAgyUsage preserves OMP bucket and reasoning invariants", () => {
     cache_read_tokens: 2,
     output_tokens: 4,
     thinking_tokens: 3,
-    total_tokens: 17,
+    total_tokens: 19,
   });
 
   assert.deepEqual(
@@ -21,13 +21,24 @@ test("mapAgyUsage preserves OMP bucket and reasoning invariants", () => {
       totalTokens: usage.totalTokens,
     },
     {
-      input: 8,
+      input: 10,
       cacheRead: 2,
       output: 7,
       reasoningTokens: 3,
-      totalTokens: 17,
+      totalTokens: 19,
     },
   );
+});
+
+test("mapAgyUsage repairs an under-reported total from canonical buckets", () => {
+  const usage = mapAgyUsage({
+    input_tokens: 10,
+    cache_read_tokens: 2,
+    output_tokens: 4,
+    thinking_tokens: 3,
+    total_tokens: 17,
+  });
+  assert.equal(usage.totalTokens, 19);
 });
 
 test("mapAgyUsage leaves unknown reasoning undefined", () => {
