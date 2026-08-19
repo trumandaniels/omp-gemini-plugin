@@ -54,12 +54,18 @@ agy -p "Reply READY" --output-format json --print-timeout 2m
 
 Headless mode uses cached credentials and will not complete a new interactive sign-in from the provider subprocess.
 
-## The bridge says the custom agent is missing
+## The bridge says the custom agent is missing or stale
 
-Install it:
+Install the exact agent definition bundled with the same bridge checkout:
 
 ```bash
 npm run install-agent -- --force
+```
+
+Or, from inside OMP:
+
+```text
+/agy-install-agent
 ```
 
 Expected path:
@@ -68,33 +74,70 @@ Expected path:
 ~/.gemini/config/agents/omp-bridge-model/agent.md
 ```
 
-Verify discovery:
+Verify discovery and exact-file freshness:
 
 ```bash
 agy agents
+npm run doctor
 ```
 
-Then restart OMP.
+`doctor` should report both of these as `PASS`:
 
-## Provider-mode agy unexpectedly used its own tools
+```text
+tool-less bridge agent file
+tool-less bridge agent contents
+```
 
-This is a fail-closed error. Common causes:
+Fully exit every OMP and `agy` process after replacing the agent, then start a new OMP process. Custom-agent definitions and provider metadata are loaded at process startup.
 
-- the custom agent was not installed;
-- `agentName` points at a different agent;
-- an existing agent file was not overwritten;
-- an Antigravity update changed custom-agent behavior;
-- the CLI ignored `--agent`.
+## Provider-mode agy unexpectedly used its own harness
 
-Repair:
+This is an intentional fail-closed error: provider mode must return OMP tool requests, not execute Antigravity tools itself.
+
+Antigravity CLI 1.1.14 introduced the `inheritCustomizations` switch for markdown agents. Without an explicit opt-out, a declarative agent may inherit personal skills, rules, plugins, subagents, or MCP servers even when it declares `tools: []`. Older bridge-agent files did not include that opt-out.
+
+The current bundled agent explicitly sets:
+
+```yaml
+tools: []
+subagent: false
+commandExecutionPolicy: off
+inheritCustomizations: false
+inherit_user: false
+inheritMcp: false
+mcpServers: []
+skills: []
+plugins: []
+rules: []
+```
+
+Repair from the repository root:
 
 ```bash
+git switch main
+git pull
+cd omp-agy-native-bridge
 npm run install-agent -- --force
-agy agents
-AGY_BRIDGE_AGENT=omp-bridge-model npm run doctor
+npm run doctor:live
 ```
 
-Do not set `rejectAgyToolUseInProviderMode: false` until you have inspected the stream and understood the change. Allowing both Antigravity and OMP to act on the workspace creates two competing harnesses.
+If the plugin was installed from this checkout rather than linked, reinstall it too:
+
+```bash
+omp plugin install "$PWD"
+```
+
+Then fully terminate and restart OMP. Merely dismissing the message or starting a new turn does not reload the custom-agent definition.
+
+The improved error reports unique tool invocation names and distinguishes them from repeated `ACTIVE`/`DONE` lifecycle updates. If the failure remains after a clean reinstall and restart, copy the complete new error. A message such as:
+
+```text
+2 tool invocation(s) from 6 lifecycle update(s) [codesearch, read_file]
+```
+
+is much more diagnostic than the previous raw count.
+
+Do **not** set `rejectAgyToolUseInProviderMode: false` as a workaround. That would allow Antigravity and OMP to become competing workspace harnesses, bypassing OMP's native tool cards and permission boundary.
 
 ## Unknown model selection
 
