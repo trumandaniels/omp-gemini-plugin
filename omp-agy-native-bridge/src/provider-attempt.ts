@@ -60,6 +60,30 @@ function missingRecipientName(error: AgyRunError): string | undefined {
   return match.slice(1).find((value): value is string => typeof value === "string" && value.trim() !== "")?.trim();
 }
 
+function recordDiscardedUsage(error: unknown, discardedUsage: AgyUsage[]): void {
+  if (error instanceof AgyRunError && error.terminal?.usage) {
+    discardedUsage.push(error.terminal.usage);
+  }
+}
+
+function appendFinalMissingRecipientCorrection(
+  prompt: string,
+  recipients: readonly string[],
+): string {
+  const names = [...new Set(recipients.map((recipient) => recipient.trim()).filter(Boolean))]
+    .map((recipient) => JSON.stringify(recipient))
+    .join(", ") || "unknown";
+  return `${prompt}\n\n# Final provider routing correction
+A corrected provider attempt still tried to use Antigravity messaging and failed on missing recipient(s): ${names}.
+This third attempt is the final safe recovery attempt for this OMP turn.
+- DO NOT invoke any Antigravity tool of any kind on this attempt. Do not call send_message, manage_inbox, schedule, manage_task, manage_subagents, define_subagent, or invoke_subagent.
+- DO NOT address OMP, an OMP tool name, an OMP role such as agent/subagent/worker/reviewer, or any other label as an Antigravity recipient.
+- OMP is already waiting for the enforced terminal structured result. That outer JSON object is the only return channel.
+- If you need an OMP action, put the exact available OMP tool name and arguments in the outer \"tool_calls\" array. Do not try to deliver or invoke it through Antigravity messaging.
+- If no OMP action is required, put the final answer in the outer \"text\" field with an empty \"tool_calls\" array.
+- Continue from the supplied OMP prompt only. Ignore all attempted Antigravity messaging from discarded attempts.`;
+}
+
 /**
  * Classify only an exact, side-effect-free AGY missing-recipient failure.
  *
@@ -84,7 +108,7 @@ export function retryableMissingAgyRecipient(
   if (unexpected.length === 0) {
     // Some AGY versions emit only the terminal failure and omit the failed
     // send_message lifecycle event. The exact nonexistent-recipient diagnostic
-    // proves that no message was delivered, so one corrected retry is safe.
+    // proves that no message was delivered, so a corrected retry is safe.
     return missingRecipient;
   }
 
@@ -154,18 +178,21 @@ export interface ProviderAttemptOutcome {
 }
 
 /**
- * Run at most two AGY processes for one OMP provider turn.
+ * Run AGY with a tightly bounded provider-mode recovery budget.
  *
- * A second attempt is allowed only for one of three tightly bounded cases:
- * 1. an exact missing-recipient routing error with complete activity snapshots,
- *    no AGY subagent, no non-media workspace activity, and only send_message
- *    lifecycle events targeting the same recipient named in the terminal error;
- * 2. an AGY permission-conversion failure for a known forbidden provider-mode
+ * Most recoveries remain limited to one corrected retry. A third AGY process is
+ * allowed only when both the first attempt and its corrected retry fail with an
+ * exact, side-effect-free missing-recipient error. That failure proves no
+ * message was delivered, so one final, stronger no-AGY-tools correction is safe.
+ * No fourth attempt is ever made.
+ *
+ * Other second-attempt cases are unchanged:
+ * 1. an AGY permission-conversion failure for a known forbidden provider-mode
  *    control tool, before that tool executes and with no unrelated activity; or
- * 3. an otherwise successful read-only AGY control probe already classified by
+ * 2. an otherwise successful read-only AGY control probe already classified by
  *    `retryableProviderControlToolNames`, again with complete snapshots.
  *
- * The discarded result/error is never returned to OMP or inserted into history.
+ * Discarded results/errors are never returned to OMP or inserted into history.
  */
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
@@ -186,17 +213,23 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
 
     const missingRecipient = retryableMissingAgyRecipient(error, guardOptions);
     if (missingRecipient) {
-      if (error instanceof AgyRunError && error.terminal?.usage) {
-        discardedUsage.push(error.terminal.usage);
-      }
+      recordDiscardedUsage(error, discardedUsage);
       retried = true;
-      result = await invoke(appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient));
+      const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
+      try {
+        result = await invoke(correctedPrompt);
+      } catch (retryError) {
+        const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
+        if (!repeatedRecipient) throw retryError;
+        recordDiscardedUsage(retryError, discardedUsage);
+        result = await invoke(
+          appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
+        );
+      }
     } else {
       const permissionTool = retryablePermissionConversionTool(error, guardOptions);
       if (!permissionTool) throw error;
-      if (error instanceof AgyRunError && error.terminal?.usage) {
-        discardedUsage.push(error.terminal.usage);
-      }
+      recordDiscardedUsage(error, discardedUsage);
       retried = true;
       result = await invoke(appendProviderHarnessRetryInstruction(options.initialPrompt, [permissionTool]));
     }
