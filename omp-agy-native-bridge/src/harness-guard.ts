@@ -108,6 +108,40 @@ export function unexpectedProviderHarnessToolSteps(
   return uniqueAgyToolSteps(events).filter((event) => !isAllowedMediaRead(event, options));
 }
 
+function toolAction(event: AgyStepUpdateEvent): string | undefined {
+  const parameters = event.step_update.tool_info?.parameters;
+  if (!parameters || typeof parameters !== "object" || Array.isArray(parameters)) return undefined;
+  for (const [key, value] of Object.entries(parameters)) {
+    if (normalizedToolName(key) === "action" && typeof value === "string") {
+      return normalizedToolName(value);
+    }
+  }
+  return undefined;
+}
+
+const RETRYABLE_CONTROL_ACTIONS = new Map<string, ReadonlySet<string>>([
+  ["managetask", new Set(["list", "status"])],
+  ["managesubagents", new Set(["list"])],
+]);
+
+/**
+ * Return the harmless AGY control probes that may be discarded and retried once.
+ * Mutating actions such as kill, kill_all, send_input, define, or invoke never qualify.
+ */
+export function retryableProviderControlToolNames(
+  events: readonly AgyStepUpdateEvent[],
+  options: ProviderHarnessGuardOptions = {},
+): string[] | undefined {
+  const unexpected = unexpectedProviderHarnessToolSteps(events, options);
+  if (unexpected.length === 0) return undefined;
+  for (const event of unexpected) {
+    const allowedActions = RETRYABLE_CONTROL_ACTIONS.get(normalizedToolName(toolStepName(event)));
+    const action = toolAction(event);
+    if (!allowedActions || !action || !allowedActions.has(action)) return undefined;
+  }
+  return [...new Set(unexpected.map(toolStepName))].sort((left, right) => left.localeCompare(right));
+}
+
 function activitySummaryFromSteps(
   toolSteps: readonly AgyStepUpdateEvent[],
   lifecycleCount: number,
