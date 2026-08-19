@@ -13,7 +13,7 @@ import {
 } from "@oh-my-pi/pi-ai";
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
-import { runAgy } from "./agy/runner.ts";
+import { AgyRunError, runAgy } from "./agy/runner.ts";
 import {
   assertProviderHarnessIsToolless,
   retryableProviderControlToolNames,
@@ -22,6 +22,7 @@ import {
 import { hasBridgeImages, stageBridgeImages, type StagedBridgeImages } from "./media.ts";
 import { bridgeModelSupportsImages } from "./model-capabilities.ts";
 import { appendProviderHarnessRetryInstruction, buildProviderPrompt } from "./prompt.ts";
+import { retryableRecipientOmpFailureToolNames } from "./provider-recovery.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
@@ -195,14 +196,37 @@ export function createAgyProviderStream(
           signal: options?.signal,
         });
 
-        let result = await invoke(promptResult.prompt);
-        let totalUsage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
+        let result: Awaited<ReturnType<typeof invoke>>;
+        let totalUsage = emptyUsage();
+        let correctedOnce = false;
+
+        try {
+          result = await invoke(promptResult.prompt);
+          totalUsage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
+        } catch (error) {
+          const retryTools = config.rejectAgyToolUseInProviderMode
+            ? retryableRecipientOmpFailureToolNames(error, guardOptions)
+            : undefined;
+          if (!retryTools) throw error;
+
+          correctedOnce = true;
+          if (error instanceof AgyRunError) {
+            totalUsage = mapUsage(error.terminal?.usage as Record<string, unknown> | undefined);
+          }
+          const retryPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
+          result = await invoke(retryPrompt);
+          totalUsage = addUsage(
+            totalUsage,
+            mapUsage(result.terminal.usage as Record<string, unknown> | undefined),
+          );
+        }
 
         if (config.rejectAgyToolUseInProviderMode) {
-          const retryTools = result.subagents.length === 0
+          const retryTools = !correctedOnce && result.subagents.length === 0
             ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
             : undefined;
           if (retryTools) {
+            correctedOnce = true;
             const retryPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
             const retryResult = await invoke(retryPrompt);
             totalUsage = addUsage(
