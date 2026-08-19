@@ -1,0 +1,27 @@
+name: Bridge tests
+
+on:
+  push:
+    branches:
+      - main
+      - "fix/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: omp-agy-native-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax-check TypeScript sources
+        run: npm run check:source
+      - name: Run unit and fake-process tests
+        run: npm test
