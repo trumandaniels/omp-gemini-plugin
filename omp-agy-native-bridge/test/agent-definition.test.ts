@@ -46,3 +46,11 @@ test("bundled provider agent never reports OMP tool results through AGY messagin
   assert.match(source, /structured output is already delivered back to OMP/);
   assert.match(source, /no separate report-back message is needed/);
 });
+
+test("bundled provider agent continues with narrower OMP tools after truncated discovery", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /marked truncated, limit-reached, skipped, missing, or otherwise incomplete/);
+  assert.match(source, /request for narrower OMP tool calls/);
+  assert.match(source, /Do not claim exhaustive discovery from a capped broad listing/);
+  assert.match(source, /Continue through the enforced OMP tool schema/);
+});
