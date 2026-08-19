@@ -141,6 +141,7 @@ export function createAgyProviderStream(
           initialPrompt: promptResult.prompt,
           enforceToolless: config.rejectAgyToolUseInProviderMode,
           agentName: config.agentName,
+          ompTools: promptResult.toolCatalog,
           guardOptions: {
             cwd: requestCwd,
             allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
