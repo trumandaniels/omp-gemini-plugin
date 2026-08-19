@@ -41,6 +41,17 @@ jobs:
           @oh-my-pi/pi-ai@${{ matrix.omp-version }}
           @oh-my-pi/pi-coding-agent@${{ matrix.omp-version }}
 
+      - name: Report installed OMP peer versions
+        run: |
+          node - <<'NODE'
+          const fs = require("node:fs");
+          for (const name of ["@oh-my-pi/pi-ai", "@oh-my-pi/pi-coding-agent"]) {
+            const path = `node_modules/${name}/package.json`;
+            const version = JSON.parse(fs.readFileSync(path, "utf8")).version;
+            console.log(`${name} ${version}`);
+          }
+          NODE
+
       - name: Syntax-check every TypeScript source
         run: npm run check:source
 
@@ -50,5 +61,5 @@ jobs:
       - name: Typecheck against OMP ${{ matrix.omp-version }}
         run: npm run typecheck
 
-      - name: Verify package contents
-        run: npm pack --dry-run --json
+      - name: Verify distributable package contents
+        run: npm run check:package
