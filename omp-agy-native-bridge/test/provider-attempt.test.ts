@@ -291,7 +291,31 @@ test("runProviderAttempts retries recipient subagent with explicit OMP task guid
   assert.match(prompts[1] ?? "", /request the OMP "task" tool when available/);
 });
 
-test("runProviderAttempts never performs a third AGY attempt", async () => {
+test("runProviderAttempts uses one final attempt when the corrected retry still messages OMP", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Audit the project",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length <= 2) throw missingRecipientError({}, "omp");
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 3);
+  assert.equal(outcome.discardedUsage.length, 2);
+  assert.equal(outcome.discardedUsage[0]?.total_tokens, 7);
+  assert.equal(outcome.discardedUsage[1]?.total_tokens, 7);
+  assert.match(prompts[1] ?? "", /recipient named "omp"/);
+  assert.match(prompts[2] ?? "", /Final provider routing correction/);
+  assert.match(prompts[2] ?? "", /final safe recovery attempt/);
+  assert.match(prompts[2] ?? "", /DO NOT invoke any Antigravity tool of any kind/);
+  assert.match(prompts[2] ?? "", /outer "tool_calls" array/);
+});
+
+test("runProviderAttempts never performs a fourth AGY attempt after repeated missing recipients", async () => {
   let calls = 0;
   await assert.rejects(
     runProviderAttempts({
@@ -305,7 +329,7 @@ test("runProviderAttempts never performs a third AGY attempt", async () => {
     }),
     /recipient "omp" not found/,
   );
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
 });
 
 test("runProviderAttempts retries a successful read-only AGY control probe once", async () => {
