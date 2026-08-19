@@ -13,6 +13,16 @@ import {
 import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 
 const MISSING_OMP_RECIPIENT = /^recipient\s+["'`“”‘’]?omp["'`“”‘’]?\s+(?:was\s+)?not\s+found\.?$/i;
+const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
+const RETRYABLE_PERMISSION_CONVERSION_TOOLS = new Set([
+  "schedule",
+  "managetask",
+  "managesubagents",
+  "manageinbox",
+  "definesubagent",
+  "invokesubagent",
+  "sendmessage",
+]);
 
 function normalizedToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -78,6 +88,36 @@ export function isRetryableMissingOmpRecipientError(
   return true;
 }
 
+/**
+ * AGY can fail before executing a misrouted inner-harness tool while converting
+ * that tool call into a permission descriptor. The CLI reports this as a
+ * terminal ERROR such as:
+ *
+ *   declaring permissions: cortex tool schedule: convert tool call for permissions: ...
+ *
+ * A single retry is safe only when the named tool is one of the provider-mode
+ * tools we explicitly forbid, every captured activity record is complete, no
+ * subagent exists, and no non-media AGY tool lifecycle event was observed. The
+ * permission-conversion failure occurs before that named tool executes.
+ */
+export function retryablePermissionConversionTool(
+  error: unknown,
+  options: ProviderHarnessGuardOptions = {},
+): string | undefined {
+  if (!(error instanceof AgyRunError)) return undefined;
+  if (error.terminal?.status !== "ERROR") return undefined;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string") return undefined;
+  const match = PERMISSION_CONVERSION_FAILURE.exec(terminalError.trim());
+  if (!match) return undefined;
+  const toolName = match[1];
+  if (!RETRYABLE_PERMISSION_CONVERSION_TOOLS.has(normalizedToken(toolName))) return undefined;
+  if (!providerHarnessSnapshotsComplete(error)) return undefined;
+  if (error.subagents.length > 0) return undefined;
+  if (unexpectedProviderHarnessToolSteps(error.toolSteps, options).length > 0) return undefined;
+  return toolName;
+}
+
 export interface ProviderAttemptOptions {
   initialPrompt: string;
   invoke(prompt: string): Promise<AgyRunResult>;
@@ -96,11 +136,13 @@ export interface ProviderAttemptOutcome {
 /**
  * Run at most two AGY processes for one OMP provider turn.
  *
- * A second attempt is allowed only for one of two tightly bounded cases:
+ * A second attempt is allowed only for one of three tightly bounded cases:
  * 1. the exact `recipient "omp" not found` routing error with complete activity
  *    snapshots, no AGY subagent, no non-media workspace activity, and only an
- *    explicitly OMP-targeted send_message attempt when lifecycle data exists; or
- * 2. an otherwise successful read-only AGY control probe already classified by
+ *    explicitly OMP-targeted send_message attempt when lifecycle data exists;
+ * 2. an AGY permission-conversion failure for a known forbidden provider-mode
+ *    control tool, before that tool executes and with no unrelated activity; or
+ * 3. an otherwise successful read-only AGY control probe already classified by
  *    `retryableProviderControlToolNames`, again with complete snapshots.
  *
  * The discarded result/error is never returned to OMP or inserted into history.
@@ -120,10 +162,19 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   try {
     result = await invoke(options.initialPrompt);
   } catch (error) {
-    if (!options.enforceToolless || !isRetryableMissingOmpRecipientError(error, guardOptions)) throw error;
-    if (error.terminal?.usage) discardedUsage.push(error.terminal.usage);
-    retried = true;
-    result = await invoke(appendMissingOmpRecipientRetryInstruction(options.initialPrompt));
+    if (!options.enforceToolless) throw error;
+
+    if (isRetryableMissingOmpRecipientError(error, guardOptions)) {
+      if (error.terminal?.usage) discardedUsage.push(error.terminal.usage);
+      retried = true;
+      result = await invoke(appendMissingOmpRecipientRetryInstruction(options.initialPrompt));
+    } else {
+      const permissionTool = retryablePermissionConversionTool(error, guardOptions);
+      if (!permissionTool) throw error;
+      if (error.terminal?.usage) discardedUsage.push(error.terminal.usage);
+      retried = true;
+      result = await invoke(appendProviderHarnessRetryInstruction(options.initialPrompt, [permissionTool]));
+    }
   }
 
   if (options.enforceToolless) {
