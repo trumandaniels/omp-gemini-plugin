@@ -32,10 +32,11 @@ test("bundled provider agent routes named subagents through OMP only", async () 
     "define_subagent",
     "invoke_subagent",
     "send_message",
-    "hub",
   ]) {
     assert.match(source, new RegExp(`\\b${tool}\\b`));
   }
+  assert.match(source, /An OMP tool may be named `hub`/);
+  assert.match(source, /request it only through terminal structured output/);
 });
 
 test("bundled provider agent never treats OMP as an AGY recipient", async () => {
