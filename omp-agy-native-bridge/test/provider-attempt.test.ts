@@ -144,8 +144,9 @@ test("missing-recipient classification accepts an exact terminal failure without
   );
 });
 
-test("generic missing-recipient recovery accepts OMP tool names such as read", () => {
+test("generic missing-recipient recovery accepts OMP tool and subagent concept names", () => {
   assert.equal(retryableMissingAgyRecipient(missingRecipientError({}, "read")), "read");
+  assert.equal(retryableMissingAgyRecipient(missingRecipientError({}, "subagent")), "subagent");
   assert.equal(
     retryableMissingAgyRecipient(
       missingRecipientError({ toolSteps: [], toolStepCount: 0 }, "glob"),
@@ -268,6 +269,26 @@ test("runProviderAttempts retries a missing OMP tool recipient through structure
   assert.match(prompts[1] ?? "", /recipient named "read"/);
   assert.match(prompts[1] ?? "", /OMP tool names such as read, glob, grep, bash/);
   assert.match(prompts[1] ?? "", /outer "tool_calls" array/);
+});
+
+test("runProviderAttempts retries recipient subagent with explicit OMP task guidance", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Have a subagent audit the UI",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw missingRecipientError({}, "subagent");
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /recipient named "subagent"/);
+  assert.match(prompts[1] ?? "", /never send_message to a recipient named "subagent"/);
+  assert.match(prompts[1] ?? "", /request the OMP "task" tool when available/);
 });
 
 test("runProviderAttempts never performs a third AGY attempt", async () => {
