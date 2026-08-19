@@ -171,7 +171,9 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     } else {
       const permissionTool = retryablePermissionConversionTool(error, guardOptions);
       if (!permissionTool) throw error;
-      if (error.terminal?.usage) discardedUsage.push(error.terminal.usage);
+      if (error instanceof AgyRunError && error.terminal?.usage) {
+        discardedUsage.push(error.terminal.usage);
+      }
       retried = true;
       result = await invoke(appendProviderHarnessRetryInstruction(options.initialPrompt, [permissionTool]));
     }
