@@ -3,11 +3,17 @@ import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 const promptIndex = args.indexOf("-p");
-if (promptIndex < 0 || !args[promptIndex + 1]) {
+let prompt = "";
+if (promptIndex >= 0 && args[promptIndex + 1]) {
+  prompt = args[promptIndex + 1];
+} else {
+  process.stdin.setEncoding("utf8");
+  for await (const chunk of process.stdin) prompt += chunk;
+}
+if (!prompt) {
   console.error("missing prompt");
   process.exit(2);
 }
-const prompt = args[promptIndex + 1];
 const plain = prompt.includes("FAKE:PLAIN");
 
 if (prompt.includes("FAKE:INVALID")) {
