@@ -18,6 +18,8 @@ const MAX_TOOL_SNAPSHOTS = 500;
 const MAX_SUBAGENT_SNAPSHOTS = 500;
 const MAX_NDJSON_LINE_BYTES = 4 * 1024 * 1024;
 const MAX_DIAGNOSTIC_CHARS = 2_000;
+const AGY_ACCOUNT_BOOTSTRAP_FIX_VERSION = "1.1.15";
+const AGY_ACCOUNT_BOOTSTRAP_FAILURE = /\beligibility check failed\b[\s\S]*\bload code assist\b[\s\S]*\bresource_exhausted\b/i;
 
 export interface AgyRunErrorDetails {
   stderr?: string;
@@ -77,6 +79,14 @@ function diagnosticText(value: unknown): string {
   } catch {
     return String(value).slice(0, MAX_DIAGNOSTIC_CHARS);
   }
+}
+
+function isAgyAccountBootstrapFailure(...values: unknown[]): boolean {
+  return values.some((value) => AGY_ACCOUNT_BOOTSTRAP_FAILURE.test(diagnosticText(value)));
+}
+
+function agyAccountBootstrapFailureMessage(): string {
+  return `agy account bootstrap failed before model execution. Upgrade the official Antigravity CLI to ${AGY_ACCOUNT_BOOTSTRAP_FIX_VERSION} or newer in the same environment as OMP, then fully restart OMP. Antigravity CLI ${AGY_ACCOUNT_BOOTSTRAP_FIX_VERSION} fixes personal-account startup eligibility failures when credentials are restored from the system keyring. If a direct agy -p smoke test still fails after the upgrade, the failure is upstream of this bridge.`;
 }
 
 function terminateProcessTree(child: ChildProcess, graceMs: number): NodeJS.Timeout | undefined {
@@ -314,6 +324,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     }
     if (exit.code !== 0 || terminal.status !== "SUCCESS") {
       const diagnostic = diagnosticText(terminal.error) || stderr.trim() || `status=${String(terminal.status)}`;
+      if (isAgyAccountBootstrapFailure(terminal.error, stderr, diagnostic)) {
+        throw new AgyRunError(agyAccountBootstrapFailureMessage(), failureDetails());
+      }
       throw new AgyRunError(`agy failed: ${diagnostic}`, failureDetails());
     }
 
