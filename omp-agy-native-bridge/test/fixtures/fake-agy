@@ -9,6 +9,7 @@ if (promptIndex < 0 || !args[promptIndex + 1]) {
 }
 const prompt = args[promptIndex + 1];
 const plain = prompt.includes("FAKE:PLAIN");
+const correctedProviderRetry = prompt.includes("# Mandatory provider retry correction");
 
 if (prompt.includes("FAKE:INVALID")) {
   console.log("not-json");
@@ -25,7 +26,13 @@ if (prompt.includes("FAKE:CHILD")) {
   continueForever();
 }
 
-const structured = { text: "ok", tool_calls: [], finish_reason: "stop" };
+const structured = {
+  text: prompt.includes("FAKE:RECIPIENT_OMP") && correctedProviderRetry
+    ? "Recovered through terminal structured output."
+    : "ok",
+  tool_calls: [],
+  finish_reason: "stop",
+};
 console.log(
   JSON.stringify({
     event: "init",
@@ -55,6 +62,47 @@ if (prompt.includes("FAKE:TOOL")) {
       },
     }),
   );
+}
+
+if (prompt.includes("FAKE:RECIPIENT_OMP") && !correctedProviderRetry) {
+  for (const state of ["ACTIVE", "DONE"]) {
+    console.log(
+      JSON.stringify({
+        event: "step_update",
+        step_update: {
+          conversation_id: "fake-conversation",
+          step_index: 3,
+          state,
+          step_type: "tool",
+          tool_name: "send_message",
+          tool_info: {
+            name: "send_message",
+            parameters: { recipient: "omp", message: "Here are the global agents." },
+            error: state === "DONE" ? { type: "not_found", message: 'recipient "omp" not found' } : undefined,
+          },
+        },
+      }),
+    );
+  }
+  console.log(
+    JSON.stringify({
+      event: "result",
+      result: {
+        conversation_id: "fake-conversation",
+        status: "ERROR",
+        error: 'recipient "omp" not found',
+        duration_seconds: 0.1,
+        usage: {
+          input_tokens: 12,
+          output_tokens: 3,
+          thinking_tokens: 1,
+          cache_read_tokens: 2,
+          total_tokens: 15,
+        },
+      },
+    }),
+  );
+  process.exit(1);
 }
 
 if (prompt.includes("FAKE:ERROR")) {
