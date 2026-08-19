@@ -1,14 +1,23 @@
 import { AgyRunError } from "./agy/runner.ts";
-import type { SerializedTool } from "./schema.ts";
+import { parseBridgeStructuredOutput, type SerializedTool } from "./schema.ts";
 import type { AgyRunResult, AgyStepUpdateEvent, BridgeStructuredOutput } from "./types.ts";
 
 const HOST_RETURN_RECIPIENTS = new Set(["omp", "parent", "main"]);
 const SUBAGENT_ROLE_RECIPIENTS = new Set([
   "agent",
+  "agents",
   "subagent",
   "subagents",
-  "worker",
-  "reviewer",
+  "namedsubagent",
+]);
+const CONTROL_ONLY_MESSAGES = new Set([
+  "continue",
+  "done",
+  "go",
+  "next",
+  "ok",
+  "proceed",
+  "resume",
 ]);
 
 function normalizedToken(value: string): string {
@@ -25,12 +34,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function failedSendMessage(error: AgyRunError): string | undefined {
+function messageRecipients(parameters: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  for (const key of ["recipient", "recipientName", "to", "target"] as const) {
+    const value = parameters[key];
+    if (typeof value === "string") out.push(value);
+  }
+  const recipients = parameters.recipients;
+  if (Array.isArray(recipients)) {
+    for (const value of recipients) {
+      if (typeof value === "string") out.push(value);
+    }
+  }
+  return out;
+}
+
+function failedSendMessage(error: AgyRunError, recipient: string): string | undefined {
+  const expectedRecipient = normalizedToken(recipient);
   const messages: string[] = [];
   for (const event of error.toolSteps) {
     if (normalizedToken(toolStepName(event)) !== "sendmessage") continue;
     const parameters = event.step_update.tool_info?.parameters;
     if (!parameters) continue;
+
+    const recipients = messageRecipients(parameters);
+    if (recipients.length === 0) return undefined;
+    if (recipients.some((value) => normalizedToken(value) !== expectedRecipient)) return undefined;
+
     for (const key of ["message", "content", "text", "body", "prompt", "task"] as const) {
       const value = parameters[key];
       if (typeof value === "string" && value.trim() !== "") {
@@ -92,15 +122,29 @@ function syntheticResult(output: BridgeStructuredOutput): AgyRunResult {
   };
 }
 
+function structuredHostReturn(message: string, tools: readonly SerializedTool[]): BridgeStructuredOutput | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message);
+  } catch {
+    return undefined;
+  }
+  try {
+    return parseBridgeStructuredOutput(parsed, tools.map((tool) => tool.name));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Convert a proven side-effect-free AGY missing-recipient failure into the OMP
  * response the model was trying to deliver, without asking AGY to reason again.
  *
  * This deliberately handles only cases with unambiguous transport semantics:
- * - recipient omp/parent/main + one failed message => final OMP text;
- * - recipient agent/subagent/worker/reviewer (or task) + one failed message =>
- *   OMP task tool call, but only when the current OMP task schema exposes a
- *   recognizable flat or batch shape.
+ * - recipient omp/parent/main + a valid bridge JSON envelope => that envelope;
+ * - recipient agent/subagent/subagents/named-subagent (or task) + one substantive
+ *   failed message => an OMP task tool call, but only when the current task
+ *   schema exposes a recognizable flat or batch shape.
  *
  * Other recipients (for example `read`) still use the bounded prompt retry path
  * because a free-form send_message payload cannot be safely converted into that
@@ -112,21 +156,19 @@ export function synthesizeMissingRecipientRecovery(
   tools: readonly SerializedTool[],
 ): AgyRunResult | undefined {
   if (!(error instanceof AgyRunError)) return undefined;
-  const message = failedSendMessage(error);
+  const message = failedSendMessage(error, recipient);
   if (!message) return undefined;
 
   const normalizedRecipient = normalizedToken(recipient);
   if (HOST_RETURN_RECIPIENTS.has(normalizedRecipient)) {
-    return syntheticResult({
-      text: message,
-      tool_calls: [],
-      finish_reason: "stop",
-    });
+    const output = structuredHostReturn(message, tools);
+    return output ? syntheticResult(output) : undefined;
   }
 
   const isSubagentRole = SUBAGENT_ROLE_RECIPIENTS.has(normalizedRecipient);
   const isTaskRecipient = normalizedRecipient === "task";
   if (!isSubagentRole && !isTaskRecipient) return undefined;
+  if (message.length < 8 || CONTROL_ONLY_MESSAGES.has(normalizedToken(message))) return undefined;
 
   const taskTool = tools.find((tool) => normalizedToken(tool.name) === "task");
   if (!taskTool) return undefined;
