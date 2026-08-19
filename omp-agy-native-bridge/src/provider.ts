@@ -177,12 +177,13 @@ export function createAgyProviderStream(
         emitText(stream, message, output.text);
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
 
-        message.stopReason = output.tool_calls.length > 0 ? "toolUse" : "stop";
+        const stopReason: "stop" | "toolUse" = output.tool_calls.length > 0 ? "toolUse" : "stop";
+        message.stopReason = stopReason;
         message.usage = totalUsage;
         message.duration = performance.now() - perfStart;
         stream.push({
           type: "done",
-          reason: message.stopReason,
+          reason: stopReason,
           message,
         });
       } catch (error) {
