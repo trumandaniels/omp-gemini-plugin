@@ -16,6 +16,7 @@ import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from
 import { runAgy } from "./agy/runner.ts";
 import { buildProviderPrompt } from "./prompt.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
+import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
 import { resolveAgyModelSelection } from "./model-selection.ts";
 
@@ -153,7 +154,10 @@ export function createAgyProviderStream(
           );
         }
 
-        const output = parseAgyTerminalOutput(result.terminal, promptResult.toolNames);
+        const output = unwrapNestedBridgeOutput(
+          parseAgyTerminalOutput(result.terminal, promptResult.toolNames),
+          promptResult.toolNames,
+        );
         emitText(stream, message, output.text);
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
 
