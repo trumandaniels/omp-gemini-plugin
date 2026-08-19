@@ -14,18 +14,15 @@ import {
 
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
 import { runAgy } from "./agy/runner.ts";
-import {
-  assertProviderHarnessIsToolless,
-  retryableProviderControlToolNames,
-  type ProviderHarnessGuardOptions,
-} from "./harness-guard.ts";
 import { hasBridgeImages, stageBridgeImages, type StagedBridgeImages } from "./media.ts";
 import { bridgeModelSupportsImages } from "./model-capabilities.ts";
-import { appendProviderHarnessRetryInstruction, buildProviderPrompt } from "./prompt.ts";
+import { buildProviderPrompt } from "./prompt.ts";
+import { runProviderAttempts } from "./provider-attempt.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
 import { resolveAgyModelSelection } from "./model-selection.ts";
+import { addUsage, mapAgyUsage } from "./usage.ts";
 
 function emptyUsage(): Usage {
   return {
@@ -35,40 +32,6 @@ function emptyUsage(): Usage {
     cacheWrite: 0,
     totalTokens: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  } as Usage;
-}
-
-function mapUsage(value: Record<string, unknown> | undefined): Usage {
-  const rawInput = Number(value?.input_tokens ?? 0);
-  const cacheRead = Number(value?.cache_read_tokens ?? 0);
-  const output = Number(value?.output_tokens ?? 0);
-  const total = Number(value?.total_tokens ?? rawInput + output);
-  return {
-    input: Math.max(0, rawInput - cacheRead),
-    output: Math.max(0, output),
-    cacheRead: Math.max(0, cacheRead),
-    cacheWrite: 0,
-    totalTokens: Math.max(0, total),
-    reasoningTokens: Math.max(0, Number(value?.thinking_tokens ?? 0)),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  } as Usage;
-}
-
-function addUsage(left: Usage, right: Usage): Usage {
-  return {
-    input: left.input + right.input,
-    output: left.output + right.output,
-    cacheRead: left.cacheRead + right.cacheRead,
-    cacheWrite: left.cacheWrite + right.cacheWrite,
-    totalTokens: left.totalTokens + right.totalTokens,
-    reasoningTokens: (left.reasoningTokens ?? 0) + (right.reasoningTokens ?? 0),
-    cost: {
-      input: left.cost.input + right.cost.input,
-      output: left.cost.output + right.cost.output,
-      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
-      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
-      total: left.cost.total + right.cost.total,
-    },
   } as Usage;
 }
 
@@ -140,7 +103,7 @@ export function createAgyProviderStream(
       let stagedImages: StagedBridgeImages | undefined;
       try {
         release = await semaphore.acquire(options?.signal);
-        const requestCwd = (options as SimpleStreamOptions & { cwd?: string } | undefined)?.cwd ?? cwd;
+        const requestCwd = options?.cwd ?? cwd;
         const selected = bridgeModel(config, model.id);
         if (!selected) {
           throw new Error(`official-agy model is not registered: ${model.id}`);
@@ -173,45 +136,38 @@ export function createAgyProviderStream(
           },
           config.defaultEffort,
         );
-        const guardOptions: ProviderHarnessGuardOptions = {
-          cwd: requestCwd,
-          allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
-        };
-        const invoke = (prompt: string) => runAgy({
-          prompt,
-          cwd: requestCwd,
-          binary: config.agyBinary,
-          model: resolved.model,
-          effort: resolved.effort,
-          agent: config.agentName,
-          printTimeout: config.printTimeout,
-          hardTimeoutMs: config.hardTimeoutMs,
-          sandbox: config.sandbox,
-          maxPromptBytes: config.maxPromptBytes,
-          maxStderrBytes: config.maxStderrBytes,
-          killGraceMs: config.killGraceMs,
-          sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
-          schema,
-          signal: options?.signal,
+
+        const outcome = await runProviderAttempts({
+          initialPrompt: promptResult.prompt,
+          enforceToolless: config.rejectAgyToolUseInProviderMode,
+          agentName: config.agentName,
+          guardOptions: {
+            cwd: requestCwd,
+            allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
+          },
+          invoke: (prompt) => runAgy({
+            prompt,
+            cwd: requestCwd,
+            binary: config.agyBinary,
+            model: resolved.model,
+            effort: resolved.effort,
+            agent: config.agentName,
+            printTimeout: config.printTimeout,
+            hardTimeoutMs: config.hardTimeoutMs,
+            sandbox: config.sandbox,
+            maxPromptBytes: config.maxPromptBytes,
+            maxStderrBytes: config.maxStderrBytes,
+            killGraceMs: config.killGraceMs,
+            sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
+            schema,
+            signal: options?.signal,
+          }),
         });
+        const result = outcome.result;
 
-        let result = await invoke(promptResult.prompt);
-        let totalUsage = mapUsage(result.terminal.usage as Record<string, unknown> | undefined);
-
-        if (config.rejectAgyToolUseInProviderMode) {
-          const retryTools = result.subagents.length === 0
-            ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
-            : undefined;
-          if (retryTools) {
-            const retryPrompt = appendProviderHarnessRetryInstruction(promptResult.prompt, retryTools);
-            const retryResult = await invoke(retryPrompt);
-            totalUsage = addUsage(
-              totalUsage,
-              mapUsage(retryResult.terminal.usage as Record<string, unknown> | undefined),
-            );
-            result = retryResult;
-          }
-          assertProviderHarnessIsToolless(result, config.agentName, guardOptions);
+        let totalUsage = mapAgyUsage(result.terminal.usage);
+        for (const discarded of outcome.discardedUsage) {
+          totalUsage = addUsage(mapAgyUsage(discarded), totalUsage);
         }
 
         const output = unwrapNestedBridgeOutput(
@@ -226,7 +182,7 @@ export function createAgyProviderStream(
         message.duration = performance.now() - perfStart;
         stream.push({
           type: "done",
-          reason: message.stopReason as "stop" | "toolUse",
+          reason: message.stopReason,
           message,
         });
       } catch (error) {
