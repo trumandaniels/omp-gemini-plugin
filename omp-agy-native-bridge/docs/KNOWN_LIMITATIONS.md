@@ -10,7 +10,7 @@ The official CLI applies `--json-schema` to the terminal result. Native OMP text
 
 ## Full context is replayed
 
-Provider calls are stateless. OMP's bounded context is serialized for every model turn. This is correct for OMP branch semantics but expensive.
+Provider calls are stateless. OMP's bounded context is serialized for every model turn. This is correct for OMP branch semantics but expensive. Image blocks retained in history are staged again on later turns, subject to the configured count and aggregate-byte limits.
 
 ## Prompt travels through argv
 
@@ -18,9 +18,13 @@ The CLI exposes `-p/--prompt`; this prototype therefore passes the prompt as one
 
 A production successor should use an official SDK, a documented stdin mode, or a local authenticated sidecar protocol if Google exposes one.
 
-## Text input only
+## Image input uses temporary prompt-media files
 
-The provider advertises only `text` input. OMP image blocks are replaced with placeholders in defensive serialization. The current headless CLI contract does not provide this bridge with a clean native attachment channel while the custom agent has no file tools.
+OMP requires a model to advertise `input: ["text", "image"]` before it will route `inspect_image` through that model. The bridge now advertises image input for explicit Gemini logical models and for entries explicitly marked with `supportsImages: true` or `capabilities.image: true`.
+
+The official interactive CLI documents media attachment support, but the documented headless flag set does not expose a dedicated attachment parameter. This bridge therefore writes OMP image blocks to private temporary files inside the active workspace and includes normal AGY `@file` mentions in the headless prompt. The files are deleted when the run finishes.
+
+This path still depends on the installed AGY version applying its ordinary file-mention/media preprocessing in print mode. Unit tests validate staging, mapping, limits, cleanup, and prompt construction; they cannot prove that a particular authenticated AGY build delivered the image to the remote model. `official-agy/auto` remains text-only unless explicitly marked because the bridge cannot know which model that account default resolves to.
 
 ## Tool schemas are bounded
 
@@ -48,4 +52,4 @@ Official `stream-json` is documented, but new event types or field changes can o
 
 ## Not verified against your account
 
-The included tests use a fake `agy` executable. They verify process/event/schema behavior but cannot verify your Google entitlement, keyring, quota, model list, or organization policy.
+The included tests use a fake `agy` executable. They verify process/event/schema behavior but cannot verify your Google entitlement, keyring, quota, model list, organization policy, or live headless media handling.
