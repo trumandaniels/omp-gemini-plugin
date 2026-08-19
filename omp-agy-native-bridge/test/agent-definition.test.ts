@@ -18,3 +18,21 @@ test("bundled provider agent opts out of all user customizations", async () => {
   assert.match(source, /^plugins:\s*\[\]\s*$/m);
   assert.match(source, /^rules:\s*\[\]\s*$/m);
 });
+
+test("bundled provider agent routes named subagents through OMP only", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /references to agents, subagents, named subagents, tasks, and background jobs mean OMP facilities/);
+  assert.match(source, /Questions about how OMP subagents work are informational/);
+  assert.match(source, /request the OMP `task` tool/);
+  assert.match(source, /how to make named subagents\?/);
+  for (const tool of [
+    "manage_task",
+    "manage_subagents",
+    "manage_inbox",
+    "define_subagent",
+    "invoke_subagent",
+    "send_message",
+  ]) {
+    assert.match(source, new RegExp(`\\b${tool}\\b`));
+  }
+});
