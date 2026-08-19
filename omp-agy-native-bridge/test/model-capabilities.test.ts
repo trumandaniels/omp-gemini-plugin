@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { bridgeModelSupportsImages } from "../src/model-capabilities.ts";
+import { bridgeModelInput, bridgeModelSupportsImages } from "../src/model-capabilities.ts";
 
 const base = { name: "x", reasoning: true, contextWindow: 1, maxTokens: 1 };
 
@@ -35,4 +35,10 @@ test("auto remains text-only without an explicit capability", () => {
     bridgeModelSupportsImages({ ...base, id: "auto", capabilities: { image: true } }),
     true,
   );
+});
+
+test("bridgeModelInput emits the exact OMP input metadata", () => {
+  assert.deepEqual(bridgeModelInput({ ...base, id: "gemini-3.7-flash" }, true), ["text", "image"]);
+  assert.deepEqual(bridgeModelInput({ ...base, id: "gemini-3.7-flash" }, false), ["text"]);
+  assert.deepEqual(bridgeModelInput({ ...base, id: "auto" }, true), ["text"]);
 });
