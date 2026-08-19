@@ -17,6 +17,7 @@ const MAX_EVENT_SNAPSHOTS = 2_000;
 const MAX_TOOL_SNAPSHOTS = 500;
 const MAX_SUBAGENT_SNAPSHOTS = 500;
 const MAX_NDJSON_LINE_BYTES = 4 * 1024 * 1024;
+const MAX_DIAGNOSTIC_CHARS = 2_000;
 
 export interface AgyRunErrorDetails {
   stderr?: string;
@@ -27,6 +28,9 @@ export interface AgyRunErrorDetails {
   events?: readonly AgyStreamEvent[];
   toolSteps?: readonly AgyStepUpdateEvent[];
   subagents?: readonly AgyRunResult["subagents"][number][];
+  eventCount?: number;
+  toolStepCount?: number;
+  subagentCount?: number;
 }
 
 export class AgyRunError extends Error {
@@ -38,6 +42,9 @@ export class AgyRunError extends Error {
   readonly events: AgyStreamEvent[];
   readonly toolSteps: AgyStepUpdateEvent[];
   readonly subagents: AgyRunResult["subagents"];
+  readonly eventCount: number;
+  readonly toolStepCount: number;
+  readonly subagentCount: number;
 
   constructor(message: string, details: AgyRunErrorDetails = {}) {
     super(message);
@@ -50,6 +57,9 @@ export class AgyRunError extends Error {
     this.events = [...(details.events ?? [])];
     this.toolSteps = [...(details.toolSteps ?? [])];
     this.subagents = [...(details.subagents ?? [])];
+    this.eventCount = details.eventCount ?? this.events.length;
+    this.toolStepCount = details.toolStepCount ?? this.toolSteps.length;
+    this.subagentCount = details.subagentCount ?? this.subagents.length;
   }
 }
 
@@ -57,6 +67,16 @@ function appendBounded(current: string, chunk: string, limit: number): string {
   if (current.length >= limit) return current;
   const remaining = limit - current.length;
   return current + chunk.slice(0, remaining);
+}
+
+function diagnosticText(value: unknown): string {
+  if (typeof value === "string") return value.trim().slice(0, MAX_DIAGNOSTIC_CHARS);
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value).slice(0, MAX_DIAGNOSTIC_CHARS);
+  } catch {
+    return String(value).slice(0, MAX_DIAGNOSTIC_CHARS);
+  }
 }
 
 function terminateProcessTree(child: ChildProcess, graceMs: number): NodeJS.Timeout | undefined {
@@ -182,6 +202,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     const events: AgyStreamEvent[] = [];
     const toolSteps: AgyStepUpdateEvent[] = [];
     const subagents: AgyRunResult["subagents"] = [];
+    let eventCount = 0;
+    let toolStepCount = 0;
+    let subagentCount = 0;
     let terminal: AgyRunResult["terminal"] | undefined;
     let parseFailure: Error | undefined;
     let callbackFailure: Error | undefined;
@@ -205,16 +228,31 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
             break;
           }
           if (!event) continue;
+          eventCount += 1;
           if (events.length < MAX_EVENT_SNAPSHOTS) events.push(event);
           if (event.event === "step_update") {
-            if (event.step_update.step_type === "tool" && toolSteps.length < MAX_TOOL_SNAPSHOTS) {
-              toolSteps.push(event);
+            if (event.step_update.step_type === "tool") {
+              toolStepCount += 1;
+              if (toolSteps.length < MAX_TOOL_SNAPSHOTS) toolSteps.push(event);
             }
-            const discovered = event.step_update.subagent_info?.subagents ?? [];
+            const rawSubagents = event.step_update.subagent_info?.subagents as unknown;
+            if (rawSubagents !== undefined && !Array.isArray(rawSubagents)) {
+              parseFailure = new Error("agy step_update subagent_info.subagents must be an array");
+              terminate();
+              break;
+            }
+            const discovered = Array.isArray(rawSubagents) ? rawSubagents : [];
+            subagentCount += discovered.length;
             for (const subagent of discovered) {
               if (subagents.length >= MAX_SUBAGENT_SNAPSHOTS) break;
-              subagents.push(subagent);
+              if (!subagent || typeof subagent !== "object" || Array.isArray(subagent)) {
+                parseFailure = new Error("agy subagent entry must be an object");
+                terminate();
+                break;
+              }
+              subagents.push(subagent as AgyRunResult["subagents"][number]);
             }
+            if (parseFailure) break;
           }
           if (event.event === "result") {
             if (terminal) {
@@ -251,6 +289,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
       events,
       toolSteps,
       subagents,
+      eventCount,
+      toolStepCount,
+      subagentCount,
     });
 
     if (exit.error) {
@@ -272,7 +313,7 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
       throw new AgyRunError("agy exited without a terminal result event", failureDetails());
     }
     if (exit.code !== 0 || terminal.status !== "SUCCESS") {
-      const diagnostic = terminal.error || stderr.trim() || `status=${String(terminal.status)}`;
+      const diagnostic = diagnosticText(terminal.error) || stderr.trim() || `status=${String(terminal.status)}`;
       throw new AgyRunError(`agy failed: ${diagnostic}`, failureDetails());
     }
 
@@ -284,6 +325,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
       signalCode: exit.signal,
       toolSteps,
       subagents,
+      eventCount,
+      toolStepCount,
+      subagentCount,
     };
   } finally {
     await rm(tempDir, { recursive: true, force: true });
