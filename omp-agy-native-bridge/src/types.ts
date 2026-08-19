@@ -6,10 +6,13 @@ export interface BridgeModelDefinition {
   reasoning: boolean;
   contextWindow: number;
   maxTokens: number;
-  /** Omit to let the selected Antigravity model decide. */
+  /** Optional default effort for this logical model. */
   effort?: AgyEffort;
+  /** Exact slug passed to `agy --model` for a non-tiered model. */
+  agyModelId?: string;
+  /** Exact tiered slugs passed to `agy --model`, keyed by OMP thinking effort. */
+  agyModelIdsByEffort?: Partial<Record<AgyEffort, string>>;
 }
-
 export interface BridgeConfig {
   providerId: string;
   apiId: string;

@@ -15,8 +15,9 @@ import {
 import type { BridgeConfig, BridgeModelDefinition, BridgeStructuredOutput } from "./types.ts";
 import { runAgy } from "./agy/runner.ts";
 import { buildProviderPrompt } from "./prompt.ts";
-import { buildBridgeOutputSchema, parseBridgeStructuredOutput } from "./schema.ts";
+import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { Semaphore } from "./semaphore.ts";
+import { resolveAgyModelSelection } from "./model-selection.ts";
 
 function emptyUsage(): Usage {
   return {
@@ -45,27 +46,8 @@ function mapUsage(value: Record<string, unknown> | undefined): Usage {
   } as Usage;
 }
 
-function terminalOutput(
-  terminal: { structured_output?: unknown; response?: string },
-  toolNames: readonly string[],
-): BridgeStructuredOutput {
-  let value = terminal.structured_output;
-  if (value === undefined && terminal.response) {
-    try {
-      value = JSON.parse(terminal.response);
-    } catch {
-      throw new Error("agy returned no structured_output and response was not JSON");
-    }
-  }
-  return parseBridgeStructuredOutput(value, toolNames);
-}
-
 function bridgeModel(config: BridgeConfig, id: string): BridgeModelDefinition | undefined {
   return config.models.find((item) => item.id === id);
-}
-
-function modelSlug(id: string): string | undefined {
-  return id === "auto" ? undefined : id;
 }
 
 function emitText(stream: AssistantMessageEventStream, message: AssistantMessage, text: string): void {
@@ -135,13 +117,24 @@ export function createAgyProviderStream(
         const promptResult = buildProviderPrompt(context, config);
         const schema = buildBridgeOutputSchema(promptResult.toolNames);
         const selected = bridgeModel(config, model.id);
+        if (!selected) {
+          throw new Error(`official-agy model is not registered: ${model.id}`);
+        }
+        const resolved = resolveAgyModelSelection(
+          selected,
+          {
+            reasoning: options?.reasoning,
+            disableReasoning: options?.disableReasoning,
+          },
+          config.defaultEffort,
+        );
 
         const result = await runAgy({
           prompt: promptResult.prompt,
           cwd: requestCwd,
           binary: config.agyBinary,
-          model: modelSlug(model.id),
-          effort: selected?.effort ?? (model.id === "auto" ? config.defaultEffort : undefined),
+          model: resolved.model,
+          effort: resolved.effort,
           agent: config.agentName,
           printTimeout: config.printTimeout,
           hardTimeoutMs: config.hardTimeoutMs,
@@ -160,7 +153,7 @@ export function createAgyProviderStream(
           );
         }
 
-        const output = terminalOutput(result.terminal, promptResult.toolNames);
+        const output = parseAgyTerminalOutput(result.terminal, promptResult.toolNames);
         emitText(stream, message, output.text);
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
 

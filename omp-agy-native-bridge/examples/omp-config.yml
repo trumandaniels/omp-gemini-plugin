@@ -1,15 +1,14 @@
 # Merge these keys into ~/.omp/agent/config.yml or <repo>/.omp/config.yml.
-# `auto` lets the official CLI use its configured default. After running
-# `agy models`, replace any role with an exact provider/model id shown by OMP.
+# `auto` lets the official CLI use its configured default. `high`/`medium`/`low`
+# are selected through OMP's thinking strip. After running `agy models`, pick the
+# exact logical family IDs you want per role.
 modelRoles:
-  default: official-agy/auto
-  smol: official-agy/auto
-  task: official-agy/auto
-  slow: official-agy/auto
-  plan: official-agy/auto
+  default: official-agy/gemini-3.1-pro
+  smol: official-agy/gemini-3.7-flash
+  task: official-agy/gemini-3.7-flash
+  slow: official-agy/gemini-3.1-pro
+  plan: official-agy/gemini-3.1-pro
   advisor: official-agy/auto
-  designer: official-agy/auto
-
 # OMP task fan-out plus the bridge's own semaphore should remain bounded.
 task:
   maxConcurrency: 3

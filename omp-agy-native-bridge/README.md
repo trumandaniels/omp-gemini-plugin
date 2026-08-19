@@ -100,12 +100,20 @@ Inside OMP:
 /model
 ```
 
-Choose `official-agy/auto`, or choose an exact `official-agy/<slug>` currently shown by OMP. For example, a current installation might expose:
+Choose `official-agy/auto`, or choose an exact `official-agy/<logical-gemini-id>` currently shown by OMP. For example, a current installation might expose:
 
 ```text
-official-agy/gemini-3.1-pro-high
-official-agy/gemini-3.7-flash-high
+official-agy/gemini-3.1-pro
+official-agy/gemini-3.7-flash
 ```
+
+The thinking selector controls the exact AGY tier:
+
+- `off`, `minimal`, `low` → `...-low`
+- `medium` → `...-medium`
+- `high`, `xhigh`, `max` → `...-high`
+
+`auto` still omits `--model` and only forwards an explicit thinking level.
 
 The extension always registers `auto`, synchronously runs `agy models` before provider registration, and registers the discovered slugs as an ordinary static model array for that OMP process. You may also pin or override entries in `.omp/agy-bridge.json`. Unknown pinned slugs fail loudly in official headless mode; they do not silently fall back.
 

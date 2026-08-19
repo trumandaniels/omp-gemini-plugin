@@ -16,6 +16,41 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function unwrapSingleJsonFence(value: string): string {
+  const match = /^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(value.trim());
+  return (match?.[1] ?? value).trim();
+}
+
+export function parseAgyTerminalOutput(
+  terminal: { structured_output?: unknown; response?: string },
+  allowedToolNames: readonly string[],
+): BridgeStructuredOutput {
+  if (terminal.structured_output !== undefined && terminal.structured_output !== null) {
+    const value =
+      typeof terminal.structured_output === "string"
+        ? JSON.parse(unwrapSingleJsonFence(terminal.structured_output))
+        : terminal.structured_output;
+    return parseBridgeStructuredOutput(value, allowedToolNames);
+  }
+
+  const response = terminal.response;
+  if (typeof response !== "string" || response.trim() === "") {
+    throw new Error("agy returned neither structured_output nor non-empty response text");
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(unwrapSingleJsonFence(response));
+  } catch {
+    return {
+      text: response,
+      tool_calls: [],
+      finish_reason: "stop",
+    };
+  }
+
+  return parseBridgeStructuredOutput(parsed, allowedToolNames);
+}
 
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 

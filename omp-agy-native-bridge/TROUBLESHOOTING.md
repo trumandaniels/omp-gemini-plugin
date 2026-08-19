@@ -143,14 +143,14 @@ Selecting the provider for the parent does not rewrite OMP role configuration. A
 
 ```yaml
 modelRoles:
-  default: official-agy/gemini-3.1-pro-high
-  smol: official-agy/gemini-3.7-flash-medium
-  task: official-agy/gemini-3.7-flash-high
-  slow: official-agy/gemini-3.1-pro-high
-  plan: official-agy/gemini-3.1-pro-high
+  default: official-agy/gemini-3.1-pro
+  smol: official-agy/gemini-3.7-flash
+  task: official-agy/gemini-3.7-flash
+  slow: official-agy/gemini-3.1-pro
+  plan: official-agy/gemini-3.1-pro
 ```
 
-Use `/model` or OMP config inspection to verify the resolved child role.
+Use `/model` or OMP config inspection to verify the resolved child role and the active thinking level.
 
 ## Subagents appear stuck or run serially
 

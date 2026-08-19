@@ -97,12 +97,14 @@ Do not:
 
    ```yaml
    modelRoles:
-     default: official-agy/gemini-3.1-pro-high
-     smol: official-agy/gemini-3.7-flash-medium
-     task: official-agy/gemini-3.7-flash-high
-     slow: official-agy/gemini-3.1-pro-high
-     plan: official-agy/gemini-3.1-pro-high
+     default: official-agy/gemini-3.1-pro
+     smol: official-agy/gemini-3.7-flash
+     task: official-agy/gemini-3.7-flash
+     slow: official-agy/gemini-3.1-pro
+     plan: official-agy/gemini-3.1-pro
    ```
+
+   Use OMP thinking levels (`minimal/low`, `medium`, `high`, `xhigh`, `max`) per role to steer tiers. `auto` remains the unmodified CLI default.
 
 10. Run all tests again and report exact results.
 

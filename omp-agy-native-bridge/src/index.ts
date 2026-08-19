@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-import type { Api } from "@oh-my-pi/pi-ai";
+import type { Api, Model } from "@oh-my-pi/pi-ai";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 import { installAgentFile } from "./agent-install.ts";
@@ -10,6 +10,8 @@ import { registerAgyDelegateTool } from "./delegate-tool.ts";
 import { runDoctor } from "./doctor.ts";
 import { createAgyProviderStream } from "./provider.ts";
 import { Semaphore } from "./semaphore.ts";
+
+type AgyThinkingEffort = NonNullable<Model["thinking"]>["efforts"][number];
 
 export default function officialAgyBridge(pi: ExtensionAPI): void {
   // Resolve and validate everything before mutating OMP's provider registry.
@@ -22,17 +24,40 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
     models: mergeDiscoveredModels(baseConfig.models, discovery, baseConfig),
   };
   const semaphore = new Semaphore(config.maxConcurrent);
+  const providerModels = config.models.map((model) => {
+    const thinking = model.agyModelIdsByEffort
+      ? (() => {
+          const efforts: AgyThinkingEffort[] = [];
+          const routes = model.agyModelIdsByEffort;
+          if (routes.low) efforts.push("minimal" as AgyThinkingEffort);
+          if (routes.medium) efforts.push("medium" as AgyThinkingEffort);
+          if (routes.high) efforts.push("high" as AgyThinkingEffort);
+          return {
+            mode: "effort" as const,
+            efforts,
+            defaultLevel: routes.high
+              ? ("high" as AgyThinkingEffort)
+              : routes.medium
+                ? ("medium" as AgyThinkingEffort)
+                : ("minimal" as AgyThinkingEffort),
+            requiresEffort: true,
+          };
+        })()
+      : undefined;
+
+    return {
+      id: model.id,
+      name: model.name,
+      reasoning: model.reasoning,
+      thinking,
+      input: ["text" as const],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+    };
+  });
   const streamSimple = createAgyProviderStream(config, semaphore, process.cwd());
   const bundledAgent = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
-  const providerModels = config.models.map((model) => ({
-    id: model.id,
-    name: model.name,
-    reasoning: model.reasoning,
-    input: ["text" as const],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
-  }));
 
   if (config.enableDelegateTool) {
     registerAgyDelegateTool(pi, config, semaphore);

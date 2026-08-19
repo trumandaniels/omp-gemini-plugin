@@ -4,8 +4,17 @@ import { existsSync } from "node:fs";
 import { globalAgentPath } from "./agent-install.ts";
 import { runAgy } from "./agy/runner.ts";
 import { parseAgyModelsOutput } from "./model-discovery.ts";
-import { buildBridgeOutputSchema, parseBridgeStructuredOutput } from "./schema.ts";
-import type { BridgeConfig } from "./types.ts";
+import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
+import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
+
+function configuredModelSlugs(model: BridgeModelDefinition): string[] {
+  if (model.id === "auto") return [];
+  if (model.agyModelIdsByEffort) {
+    return Object.values(model.agyModelIdsByEffort).filter((value): value is string => typeof value === "string");
+  }
+  if (model.agyModelId) return [model.agyModelId];
+  return [model.id];
+}
 
 export interface DoctorReport {
   ok: boolean;
@@ -94,9 +103,12 @@ export async function runDoctor(
 
   if (models?.code === 0) {
     const listed = new Set(modelSlugs);
-    const stale = config.models
-      .filter((model) => model.id !== "auto" && !listed.has(model.id))
-      .map((model) => model.id);
+    const configured = new Set(
+      config.models
+        .flatMap(configuredModelSlugs)
+        .filter((model) => model.length > 0),
+    );
+    const stale = [...configured].filter((slug) => !listed.has(slug));
     checks.push({
       name: "configured model catalog",
       ok: stale.length === 0,
@@ -121,7 +133,7 @@ export async function runDoctor(
         sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
         schema: buildBridgeOutputSchema([]),
       });
-      const output = parseBridgeStructuredOutput(result.terminal.structured_output, []);
+      const output = parseAgyTerminalOutput(result.terminal, []);
       const safeHarness = result.toolSteps.length === 0 && result.subagents.length === 0;
       checks.push({
         name: "live provider transport",

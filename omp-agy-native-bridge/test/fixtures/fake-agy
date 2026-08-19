@@ -8,6 +8,7 @@ if (promptIndex < 0 || !args[promptIndex + 1]) {
   process.exit(2);
 }
 const prompt = args[promptIndex + 1];
+const plain = prompt.includes("FAKE:PLAIN");
 
 if (prompt.includes("FAKE:INVALID")) {
   console.log("not-json");
@@ -25,63 +26,83 @@ if (prompt.includes("FAKE:CHILD")) {
 }
 
 const structured = { text: "ok", tool_calls: [], finish_reason: "stop" };
-console.log(JSON.stringify({
-  event: "init",
-  conversation_id: "fake-conversation",
-  init: {
-    cwd: process.cwd(),
-    tools: [],
-    permission_mode: "request-review",
-    model: args.includes("--model") ? args[args.indexOf("--model") + 1] : "default",
-    agent: args.includes("--agent") ? args[args.indexOf("--agent") + 1] : "default",
-  },
-}));
+console.log(
+  JSON.stringify({
+    event: "init",
+    conversation_id: "fake-conversation",
+    init: {
+      cwd: process.cwd(),
+      tools: [],
+      permission_mode: "request-review",
+      model: args.includes("--model") ? args[args.indexOf("--model") + 1] : "default",
+      agent: args.includes("--agent") ? args[args.indexOf("--agent") + 1] : "default",
+    },
+  }),
+);
 
 if (prompt.includes("FAKE:TOOL")) {
-  console.log(JSON.stringify({
-    event: "step_update",
-    step_update: {
-      conversation_id: "fake-conversation",
-      step_index: 1,
-      state: "DONE",
-      step_type: "tool",
-      tool_name: "read_file",
-      tool_info: { name: "read_file", parameters: { path: "README.md" }, output: "ok" },
-      subagent_info: { subagents: [{ role: "reviewer", conversation_id: "child-1" }] },
-    },
-  }));
+  console.log(
+    JSON.stringify({
+      event: "step_update",
+      step_update: {
+        conversation_id: "fake-conversation",
+        step_index: 1,
+        state: "DONE",
+        step_type: "tool",
+        tool_name: "read_file",
+        tool_info: { name: "read_file", parameters: { path: "README.md" }, output: "ok" },
+        subagent_info: { subagents: [{ role: "reviewer", conversation_id: "child-1" }] },
+      },
+    }),
+  );
 }
 
 if (prompt.includes("FAKE:ERROR")) {
-  console.log(JSON.stringify({
-    event: "result",
-    result: { status: "ERROR", error: "fake failure" },
-  }));
+  console.log(
+    JSON.stringify({
+      event: "result",
+      result: { status: "ERROR", error: "fake failure" },
+    }),
+  );
   process.exit(1);
 }
 
-console.log(JSON.stringify({
-  event: "step_update",
-  step_update: {
-    conversation_id: "fake-conversation",
-    step_index: 2,
-    state: "DONE",
-    step_type: "agent_response",
-    text_delta: JSON.stringify(structured),
-  },
-}));
-console.log(JSON.stringify({
-  event: "result",
-  result: {
-    conversation_id: "fake-conversation",
-    status: "SUCCESS",
-    response: JSON.stringify(structured),
-    structured_output: structured,
-    duration_seconds: 0.1,
-    num_turns: 1,
-    usage: { input_tokens: 10, output_tokens: 4, thinking_tokens: 0, cache_read_tokens: 2, total_tokens: 14 },
-  },
-}));
+const responseText = plain ? "plain provider response" : JSON.stringify(structured);
+if (!plain) {
+  console.log(
+    JSON.stringify({
+      event: "step_update",
+      step_update: {
+        conversation_id: "fake-conversation",
+        step_index: 2,
+        state: "DONE",
+        step_type: "agent_response",
+        text_delta: responseText,
+      },
+    }),
+  );
+}
+
+console.log(
+  JSON.stringify({
+    event: "result",
+    result: {
+      conversation_id: "fake-conversation",
+      status: "SUCCESS",
+      response: responseText,
+      ...(plain ? {} : { structured_output: structured }),
+      duration_seconds: 0.1,
+      num_turns: 1,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 4,
+        thinking_tokens: 0,
+        cache_read_tokens: 2,
+        total_tokens: 14,
+      },
+    },
+  }),
+);
 
 function continueForever() {
   // Keeps the process alive until the bridge aborts or times out.

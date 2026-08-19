@@ -35,6 +35,25 @@ test("runAgy parses official stream-json shape", async () => {
   assert.equal(result.toolSteps.length, 0);
 });
 
+test("runAgy accepts successful plain-text responses without structured_output", async () => {
+  const result = await runAgy({
+    prompt: "FAKE:PLAIN",
+    cwd: process.cwd(),
+    binary: fakeAgy,
+    printTimeout: "1m",
+    hardTimeoutMs: 10_000,
+    sandbox: true,
+    maxPromptBytes: 100_000,
+    maxStderrBytes: 10_000,
+    killGraceMs: 100,
+    sanitizeAccountEnvironment: true,
+  });
+  assert.equal(result.terminal.status, "SUCCESS");
+  assert.equal(result.terminal.response, "plain provider response");
+  assert.equal(result.terminal.structured_output, undefined);
+  assert.equal(result.toolSteps.length, 0);
+});
+
 test("runAgy refuses oversized argv prompts", async () => {
   await assert.rejects(
     runAgy({
