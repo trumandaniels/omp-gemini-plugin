@@ -10,6 +10,21 @@ export interface ProviderPromptResult {
   toolCatalog: ReturnType<typeof serializeTools>;
 }
 
+export function appendProviderHarnessRetryInstruction(
+  prompt: string,
+  forbiddenToolNames: readonly string[],
+): string {
+  const names = [...new Set(forbiddenToolNames)].sort().join(", ") || "unknown";
+  return `${prompt}\n\n# Mandatory provider retry correction
+The previous attempt was discarded because it invoked forbidden Antigravity control tool(s): ${names}.
+- Do not use or rely on any result returned by those Antigravity tools.
+- Do not invoke any Antigravity tool on this retry.
+- Answer from the supplied OMP system prompt, OMP conversation, and OMP tool catalog only.
+- Unqualified task, agent, subagent, and named-subagent requests are OMP requests.
+- For an informational OMP question, answer directly with no tool call.
+- If the user requested actual OMP subagent execution, return only an OMP "task" tool call that follows the supplied schema.`;
+}
+
 export function buildProviderPrompt(
   context: { systemPrompt?: readonly string[]; messages?: readonly unknown[]; tools?: readonly ToolLike[] },
   config: BridgeConfig,
