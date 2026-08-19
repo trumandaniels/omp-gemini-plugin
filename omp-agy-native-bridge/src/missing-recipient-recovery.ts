@@ -78,14 +78,29 @@ function schemaProperties(tool: SerializedTool): Record<string, unknown> | undef
   return isRecord(tool.parameters.properties) ? tool.parameters.properties : undefined;
 }
 
+function requiredKeys(schema: Record<string, unknown>): Set<string> {
+  return new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter((value): value is string => typeof value === "string")
+      : [],
+  );
+}
+
 function taskArguments(tool: SerializedTool, task: string): Record<string, unknown> | undefined {
   const properties = schemaProperties(tool);
   if (!properties) return undefined;
+  const required = requiredKeys(tool.parameters);
 
   // OMP defaults to task.batch=true, whose model-facing shape is
-  // { context, tasks: [{ task, ... }] }. Respect the exact schema supplied by
-  // OMP rather than assuming a particular installed OMP version.
-  if (isRecord(properties.tasks)) {
+  // { context, tasks: [{ task, ... }] }. Respect and validate the exact schema
+  // supplied by OMP rather than assuming a particular installed OMP version.
+  const tasksSchema = properties.tasks;
+  if (isRecord(tasksSchema)) {
+    const itemSchema = isRecord(tasksSchema.items) ? tasksSchema.items : undefined;
+    const itemProperties = itemSchema && isRecord(itemSchema.properties) ? itemSchema.properties : undefined;
+    if (!itemProperties || !Object.prototype.hasOwnProperty.call(itemProperties, "task")) return undefined;
+    if (required.has("context") && !Object.prototype.hasOwnProperty.call(properties, "context")) return undefined;
+
     const args: Record<string, unknown> = {
       tasks: [{ task }],
     };
