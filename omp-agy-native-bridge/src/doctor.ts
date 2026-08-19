@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 
 import { agentFilesMatch, globalAgentPath } from "./agent-install.ts";
 import { runAgy } from "./agy/runner.ts";
+import { buildAgyEnvironment } from "./env.ts";
 import { providerHarnessActivitySummary } from "./harness-guard.ts";
-import { parseAgyModelsOutput } from "./model-discovery.ts";
+import { discoverAgyModelsSync } from "./model-discovery.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
 
@@ -27,11 +28,13 @@ async function capture(
   command: string,
   args: string[],
   cwd: string,
+  env: NodeJS.ProcessEnv,
   timeoutMs = 10_000,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return await new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
@@ -60,27 +63,45 @@ async function capture(
   });
 }
 
+async function captureListCommand(
+  command: string,
+  subcommand: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  const json = await capture(command, [subcommand, "--output-format", "json"], cwd, env);
+  if (json.code === 0) return json;
+  const table = await capture(command, [subcommand], cwd, env);
+  return {
+    ...table,
+    stderr: [json.stderr.trim(), table.stderr.trim()].filter(Boolean).join("\n"),
+  };
+}
+
 export async function runDoctor(
   config: BridgeConfig,
   cwd = process.cwd(),
   options: { live?: boolean; expectedAgentPath?: string } = {},
 ): Promise<DoctorReport> {
   const checks: DoctorReport["checks"] = [];
-  const version = await capture(config.agyBinary, ["--version"], cwd);
+  const agyEnv = buildAgyEnvironment(config.sanitizeAccountEnvironment);
+  const version = await capture(config.agyBinary, ["--version"], cwd, agyEnv);
   checks.push({
     name: "agy binary",
     ok: version.code === 0,
     detail: version.code === 0 ? version.stdout.trim() || version.stderr.trim() || "available" : version.stderr.trim() || "not found",
   });
 
-  const models = version.code === 0 ? await capture(config.agyBinary, ["models"], cwd) : undefined;
-  const modelSlugs = models?.code === 0 ? parseAgyModelsOutput(models.stdout) : [];
+  const modelDiscovery = version.code === 0
+    ? discoverAgyModelsSync(config, cwd)
+    : undefined;
+  const modelSlugs = modelDiscovery?.models ?? [];
   checks.push({
     name: "agy models",
-    ok: models?.code === 0 && modelSlugs.length > 0,
-    detail: models?.code === 0
-      ? `${modelSlugs.length} model slug(s): ${modelSlugs.slice(0, 8).join(", ")}${modelSlugs.length > 8 ? ", …" : ""}`
-      : models?.stderr.trim() || "skipped because agy is unavailable",
+    ok: modelDiscovery?.ok === true && modelSlugs.length > 0,
+    detail: modelDiscovery?.ok
+      ? `${modelSlugs.length} model slug(s) via ${modelDiscovery.format ?? "unknown"}: ${modelSlugs.slice(0, 8).join(", ")}${modelSlugs.length > 8 ? ", …" : ""}`
+      : modelDiscovery?.stderr.trim() || modelDiscovery?.error || "skipped because agy is unavailable",
   });
 
   const agentPath = globalAgentPath(config.agentName);
@@ -103,7 +124,9 @@ export async function runDoctor(
     });
   }
 
-  const agents = version.code === 0 ? await capture(config.agyBinary, ["agents"], cwd) : undefined;
+  const agents = version.code === 0
+    ? await captureListCommand(config.agyBinary, "agents", cwd, agyEnv)
+    : undefined;
   const agentListed = agents?.code === 0 && agents.stdout.includes(config.agentName);
   checks.push({
     name: "agy agent discovery",
@@ -115,7 +138,7 @@ export async function runDoctor(
       : agents?.stderr.trim() || "skipped because agy is unavailable",
   });
 
-  if (models?.code === 0) {
+  if (modelDiscovery?.ok) {
     const listed = new Set(modelSlugs);
     const configured = new Set(
       config.models
