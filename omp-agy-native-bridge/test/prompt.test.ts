@@ -65,7 +65,7 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   assert.match(result.prompt, /"name": \{/);
 });
 
-test("provider prompt treats structured output as the only return channel after an OMP tool result", () => {
+test("provider prompt treats structured output as the only return channel after an incomplete OMP tool result", () => {
   const result = buildProviderPrompt(
     {
       systemPrompt: ["Inspect global OMP configuration accurately."],
@@ -91,7 +91,12 @@ test("provider prompt treats structured output as the only return channel after 
           role: "toolResult",
           toolCallId: "call-1",
           toolName: "glob",
-          content: [{ type: "text", text: "/home/test/.omp/agent/config.yml" }],
+          content: [
+            {
+              type: "text",
+              text: "/home/test/.omp/agent/config.yml\n… 192 more files\ntruncated: limit 200 results\nskipped missing: /home/test/.config/omp/**/*",
+            },
+          ],
         },
       ],
       tools: [],
@@ -104,8 +109,12 @@ test("provider prompt treats structured output as the only return channel after 
   assert.match(result.prompt, /OMP is not an Antigravity agent or message recipient/);
   assert.match(result.prompt, /Never call send_message or manage_inbox with recipient\/to "omp"/);
   assert.match(result.prompt, /terminal structured response is the return channel to OMP/);
+  assert.match(result.prompt, /Treat result warnings such as "truncated", "limit reached", "skipped missing"/);
+  assert.match(result.prompt, /more targeted OMP tool calls are required/);
+  assert.match(result.prompt, /Do not finalize from an incomplete result/);
   assert.match(result.prompt, /what agents do I already have globally\?/);
-  assert.match(result.prompt, /\/home\/test\/\.omp\/agent\/config\.yml/);
+  assert.match(result.prompt, /truncated: limit 200 results/);
+  assert.match(result.prompt, /skipped missing: \/home\/test\/\.config\/omp\/\*\*\/\*/);
 });
 
 test("provider retry correction discards AGY probes and insists on structured return", () => {
@@ -120,6 +129,7 @@ test("provider retry correction discards AGY probes and insists on structured re
   assert.match(corrected, /OMP is not an Antigravity message recipient/);
   assert.match(corrected, /Never call send_message or manage_inbox with recipient\/to "omp"/);
   assert.match(corrected, /Put the answer in the outer "text" field/);
+  assert.match(corrected, /If an OMP tool result is truncated, limit-reached, skipped, missing, or otherwise incomplete/);
   assert.match(corrected, /informational OMP question, answer directly with no tool call/);
   assert.match(corrected, /return only an OMP "task" tool call/);
 });
