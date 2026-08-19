@@ -1,0 +1,32 @@
+#!/usr/bin/env node
+
+const args = process.argv.slice(2);
+if (args[0] !== "models") {
+  console.error("expected models command");
+  process.exit(2);
+}
+if (process.env.GEMINI_API_KEY) {
+  console.error("GEMINI_API_KEY leaked into model discovery");
+  process.exit(9);
+}
+
+const machineReadable = args.includes("--output-format") && args[args.indexOf("--output-format") + 1] === "json";
+if (machineReadable) {
+  if (process.env.FAKE_AGY_MODELS_JSON_FAIL === "1") {
+    console.error("machine-readable listing unsupported");
+    process.exit(3);
+  }
+  console.log(
+    JSON.stringify({
+      models: [
+        { id: "gemini-3.7-flash-low", displayName: "Gemini 3.7 Flash Low" },
+        { model: "gemini-3.7-flash-high", displayName: "Gemini 3.7 Flash High" },
+      ],
+    }),
+  );
+  process.exit(0);
+}
+
+console.log("Available models");
+console.log("* gemini-3.1-pro-low");
+console.log("  gemini-3.1-pro-high");
