@@ -3,7 +3,7 @@ import { chmod } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
-import { AgyRunError, runAgy } from "../src/agy/runner.ts";
+import { AgyRunError, runAgy, type AgyRunErrorDetails } from "../src/agy/runner.ts";
 import {
   isRetryableMissingOmpRecipientError,
   runProviderAttempts,
@@ -30,7 +30,7 @@ function sendMessageEvent(state: string): AgyStepUpdateEvent {
   };
 }
 
-function missingRecipientError(overrides: Partial<ConstructorParameters<typeof AgyRunError>[1]> = {}): AgyRunError {
+function missingRecipientError(overrides: Partial<AgyRunErrorDetails> = {}): AgyRunError {
   return new AgyRunError('agy failed: recipient "omp" not found', {
     exitCode: 1,
     status: "ERROR",
