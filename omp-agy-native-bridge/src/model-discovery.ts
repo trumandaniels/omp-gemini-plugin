@@ -195,15 +195,26 @@ export function discoverAgyModelsSync(
   // path avoids launching a second eligibility/account-bootstrap process on
   // the common case.
   const plain = runModelsCommand(config, ["models"], cwd, timeoutMs);
-  const plainModels = plain.status === 0 && !plain.error
-    ? parseAgyModelsOutput(plain.stdout)
-    : [];
+  if (plain.status !== 0 || plain.error) {
+    // An alternate output format cannot repair an authentication, TLS,
+    // entitlement, timeout, or process-start failure. Preserve the first
+    // operational error and do not immediately hammer the same AGY bootstrap
+    // path with another process.
+    return {
+      ok: false,
+      models: [],
+      ...plain,
+    };
+  }
+
+  const plainModels = parseAgyModelsOutput(plain.stdout);
   if (plainModels.length > 0) {
     return { ok: true, models: plainModels, ...plain };
   }
 
-  // Keep machine-readable discovery only as a compatibility fallback for a
-  // future/plain format the table parser no longer recognizes.
+  // Keep machine-readable discovery only as a parser/format compatibility
+  // fallback when the plain command itself succeeded but yielded no recognized
+  // model slugs.
   const machine = runModelsCommand(config, ["models", "--output-format", "json"], cwd, timeoutMs);
   const machineModels = machine.status === 0 && !machine.error
     ? parseAgyModelsOutput(machine.stdout)
