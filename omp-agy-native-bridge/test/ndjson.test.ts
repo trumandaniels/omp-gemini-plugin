@@ -13,14 +13,14 @@ test("parseAgyEventLine accepts init, update, and result", () => {
   assert.equal(parseAgyEventLine('{"event":"result","result":{"status":"SUCCESS"}}')?.event, "result");
 });
 
-test("parseAgyEventLine ignores unknown future progress events", () => {
-  assert.equal(
-    parseAgyEventLine('{"event":"progress","progress":{"message":"new AGY event"}}'),
-    undefined,
+test("parseAgyEventLine rejects unknown events until their security semantics are reviewed", () => {
+  assert.throws(
+    () => parseAgyEventLine('{"event":"progress","progress":{"message":"new AGY event"}}'),
+    /Unknown agy stream event: progress/,
   );
 });
 
-test("parseAgyEventLine still rejects malformed known events", () => {
+test("parseAgyEventLine rejects malformed known events", () => {
   assert.throws(() => parseAgyEventLine('{"event":"init","init":[]}'), /missing init payload/);
   assert.throws(() => parseAgyEventLine('{"event":"step_update","step_update":"bad"}'), /missing step_update payload/);
   assert.throws(() => parseAgyEventLine('{"event":"result","result":null}'), /missing result payload/);
