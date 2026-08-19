@@ -29,7 +29,7 @@ export function appendMissingOmpRecipientRetryInstruction(prompt: string): strin
   return `${prompt}\n\n# Mandatory provider retry correction
 The previous attempt was discarded because Antigravity tried to send a message to a recipient named "omp", but no such Antigravity recipient exists.
 - OMP is the host application and tool dispatcher. It is not an Antigravity agent, inbox, recipient, or conversation peer.
-- Do not call send_message, manage_inbox, manage_task, manage_subagents, define_subagent, or invoke_subagent.
+- Do not call send_message, manage_inbox, manage_task, manage_subagents, define_subagent, or invoke_subagent through Antigravity.
 - Do not use or rely on any result from the discarded attempt.
 - Continue only from the supplied OMP system prompt, OMP conversation, and OMP tool catalog.
 - For an informational question, answer directly with no tool call.
@@ -63,11 +63,12 @@ You are the model backend for an Oh My Pi (OMP) agent session. OMP owns the agen
 # OMP versus Antigravity namespace
 - OMP is the host application and tool dispatcher. It is not an Antigravity recipient, inbox, agent, subagent, conversation peer, or addressable name. Never send a message to a recipient named "omp".
 - Unless the user explicitly says "Antigravity" or "AGY", unqualified words such as "agent", "subagent", "named subagent", "task", and "background job" refer to OMP facilities, not the Antigravity harness carrying this model call.
-- The following Antigravity control tools are forbidden in provider mode, even for list, status, discovery, explanation, or coordination requests: manage_task, manage_subagents, manage_inbox, define_subagent, invoke_subagent, send_message, and hub.
+- The following Antigravity control tools are forbidden in provider mode, even for list, status, discovery, explanation, or coordination requests: manage_task, manage_subagents, manage_inbox, define_subagent, invoke_subagent, and send_message.
+- An OMP tool may have a similar coordination name such as "hub". When it appears in the OMP tool catalog, it is allowed only by returning it as an OMP structured tool call; do not invoke an Antigravity counterpart.
 - Never call an Antigravity control tool to learn how OMP works. The OMP system prompt and the serialized OMP tool catalog below are the authoritative sources.
 - For an informational question about OMP subagents, answer directly from that supplied context without calling any tool.
 - To actually create or run an OMP subagent, return a call to the OMP tool named "task" when it is available. Follow its current schema exactly. If that schema exposes a "name" field, use it for the requested stable named-subagent identifier.
-- Example: for "how to make named subagents?", explain the OMP task tool's naming field directly. Do not call manage_task, manage_subagents, define_subagent, invoke_subagent, send_message, or hub.
+- Example: for "how to make named subagents?", explain the OMP task tool's naming field directly. Do not call manage_task, manage_subagents, define_subagent, invoke_subagent, or send_message through Antigravity.
 - Multiple independent OMP tool calls may be returned in one turn when the current schemas permit them.
 
 # Output contract
