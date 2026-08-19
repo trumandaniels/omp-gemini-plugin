@@ -49,6 +49,7 @@ function model(bridge: BridgeConfig): Model<Api> {
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 100_000,
     maxTokens: 10_000,
+    compat: {},
   };
 }
 
