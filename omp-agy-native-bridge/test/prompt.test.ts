@@ -21,8 +21,48 @@ test("provider prompt tells agy to request OMP task instead of native subagents"
   );
   assert.deepEqual(result.toolNames, ["task"]);
   assert.match(result.prompt, /Do NOT invoke Antigravity tools/);
-  assert.match(result.prompt, /OMP-native subagents/);
+  assert.match(result.prompt, /To actually create or run an OMP subagent, return a call to the OMP tool named "task"/);
   assert.match(result.prompt, /Inspect the project/);
+});
+
+test("provider prompt answers named OMP subagent questions without AGY control tools", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["You are OMP."],
+      messages: [{ role: "user", content: "how to make named subagents?", timestamp: 1 }],
+      tools: [
+        {
+          name: "task",
+          description: "Run OMP subagents",
+          parameters: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              agent: { type: "string" },
+              task: { type: "string" },
+            },
+          },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /unqualified words such as "agent", "subagent", "named subagent"/);
+  assert.match(result.prompt, /For an informational question about OMP subagents, answer directly/);
+  assert.match(result.prompt, /how to make named subagents\?/);
+  for (const tool of [
+    "manage_task",
+    "manage_subagents",
+    "manage_inbox",
+    "define_subagent",
+    "invoke_subagent",
+    "send_message",
+  ]) {
+    assert.match(result.prompt, new RegExp(`\\b${tool}\\b`));
+  }
+  assert.match(result.prompt, /If that schema exposes a "name" field/);
+  assert.match(result.prompt, /"name": \{/);
 });
 
 test("provider prompt maps staged OMP images to AGY prompt-media mentions", () => {
