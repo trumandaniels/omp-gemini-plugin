@@ -12,18 +12,16 @@ function nonNegativeFinite(value: unknown): number | undefined {
 export function mapAgyUsage(value: AgyUsage | undefined): Usage {
   const promptTokens = nonNegativeFinite(value?.input_tokens) ?? 0;
   const cacheRead = nonNegativeFinite(value?.cache_read_tokens) ?? 0;
-  const visibleOutput = nonNegativeFinite(value?.output_tokens) ?? 0;
+  const reportedOutput = nonNegativeFinite(value?.output_tokens) ?? 0;
   const thinkingTokens = nonNegativeFinite(value?.thinking_tokens);
 
-  // AGY's input_tokens follows the Gemini prompt-token convention and includes
-  // cache-read tokens. OMP reports fresh input and cacheRead as disjoint buckets,
-  // so subtract cached tokens and clamp malformed upstream combinations at zero.
+  // AGY follows Gemini's aggregate counters: input_tokens includes cache reads,
+  // while output_tokens already includes thinking_tokens. OMP reports fresh input
+  // and cacheRead as disjoint buckets, so subtract cached input. Keep output at
+  // least as large as reasoning to preserve OMP's reasoning ⊆ output invariant
+  // if an upstream version emits internally inconsistent counters.
   const input = Math.max(0, promptTokens - cacheRead);
-
-  // OMP requires reasoningTokens to be a subset of output. AGY reports thinking
-  // separately, so fold it into OMP's aggregate output while preserving the
-  // dedicated reasoningTokens field when the provider supplied it.
-  const output = visibleOutput + (thinkingTokens ?? 0);
+  const output = Math.max(reportedOutput, thinkingTokens ?? 0);
   const bucketTotal = input + cacheRead + output;
   const reportedTotal = nonNegativeFinite(value?.total_tokens);
 
