@@ -65,15 +65,55 @@ test("provider prompt answers named OMP subagent questions without AGY control t
   assert.match(result.prompt, /"name": \{/);
 });
 
-test("provider retry correction discards AGY list probes and insists on OMP semantics", () => {
+test("provider prompt continues from OMP tool results without messaging an invented recipient", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["Use OMP tools."],
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "call-1", name: "glob", arguments: { path: "/home/user/.omp/**/*" } }],
+          stopReason: "toolUse",
+          timestamp: 1,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-1",
+          toolName: "glob",
+          content: [{ type: "text", text: "200 files; truncated" }],
+          isError: false,
+          timestamp: 2,
+        },
+      ],
+      tools: [
+        {
+          name: "glob",
+          description: "Find files",
+          parameters: { type: "object", properties: { path: { type: "string" } } },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /tool_result message is already the authoritative result of an OMP tool call/);
+  assert.match(result.prompt, /Never send a message to a recipient named "omp", "parent", "user"/);
+  assert.match(result.prompt, /If an OMP glob\/read result is truncated or too broad, request a narrower OMP glob\/read call/);
+  assert.match(result.prompt, /200 files; truncated/);
+});
+
+test("provider retry correction discards AGY controls and insists on OMP continuation", () => {
   const corrected = appendProviderHarnessRetryInstruction(
     "ORIGINAL PROMPT",
-    ["manage_task", "manage_subagents", "manage_task"],
+    ["send_message", "manage_task", "send_message"],
   );
   assert.match(corrected, /^ORIGINAL PROMPT/);
-  assert.match(corrected, /manage_subagents, manage_task/);
+  assert.match(corrected, /manage_task, send_message/);
   assert.match(corrected, /previous attempt was discarded/i);
   assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
+  assert.match(corrected, /never send a message to a recipient named "omp", "parent", "user"/i);
+  assert.match(corrected, /After an OMP tool result, either answer the user or request another OMP tool call/);
+  assert.match(corrected, /glob\/read result was truncated, request a narrower OMP glob\/read call/);
   assert.match(corrected, /informational OMP question, answer directly with no tool call/);
   assert.match(corrected, /return only an OMP "task" tool call/);
 });
