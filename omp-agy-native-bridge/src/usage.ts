@@ -10,15 +10,15 @@ function nonNegativeFinite(value: unknown): number | undefined {
 
 /** Map AGY's aggregate usage fields onto OMP's canonical Usage invariants. */
 export function mapAgyUsage(value: AgyUsage | undefined): Usage {
-  const rawInput = nonNegativeFinite(value?.input_tokens);
+  const input = nonNegativeFinite(value?.input_tokens) ?? 0;
   const cacheRead = nonNegativeFinite(value?.cache_read_tokens) ?? 0;
   const visibleOutput = nonNegativeFinite(value?.output_tokens) ?? 0;
   const thinkingTokens = nonNegativeFinite(value?.thinking_tokens);
 
-  // AGY reports thinking in its own bucket. OMP requires reasoningTokens to be
-  // a subset of output, so fold the thinking bucket into OMP's total output.
+  // AGY reports input, cache-read, visible output, and thinking as separate
+  // buckets. OMP requires reasoningTokens to be a subset of output, so fold
+  // only the thinking bucket into OMP's aggregate output.
   const output = visibleOutput + (thinkingTokens ?? 0);
-  const input = rawInput === undefined ? 0 : Math.max(0, rawInput - cacheRead);
   const bucketTotal = input + cacheRead + output;
   const reportedTotal = nonNegativeFinite(value?.total_tokens);
 
