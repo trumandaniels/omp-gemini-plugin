@@ -128,12 +128,12 @@ function terminateProcessTree(child: ChildProcess, graceMs: number): NodeJS.Time
   return timer;
 }
 
-/** Run the official agy executable through its documented headless protocol. */
+/** Run the official agy executable through its headless stream-json protocol. */
 export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
   const bytes = Buffer.byteLength(options.prompt, "utf8");
   if (bytes > options.maxPromptBytes) {
     throw new AgyRunError(
-      `OMP context became ${bytes.toLocaleString()} bytes, above AGY_BRIDGE_MAX_PROMPT_BYTES=${options.maxPromptBytes.toLocaleString()}. Compact the OMP session, raise the limit on Linux/WSL, or use delegate mode.`,
+      `OMP context became ${bytes.toLocaleString()} bytes, above AGY_BRIDGE_MAX_PROMPT_BYTES=${options.maxPromptBytes.toLocaleString()}. Compact the OMP session, raise the limit, or use delegate mode.`,
     );
   }
   if (options.signal?.aborted) {
@@ -148,7 +148,11 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
       await writeFile(schemaPath, JSON.stringify(options.schema), { encoding: "utf8", mode: 0o600 });
     }
 
-    const args = ["-p", options.prompt, "--output-format", "stream-json"];
+    // Do not place the complete OMP context in argv. Large sessions can exceed
+    // the host's execve/posix_spawn argument budget (E2BIG) before agy starts.
+    // Current AGY print mode consumes a non-TTY stdin prompt when no -p/--print
+    // prompt value is supplied, which also keeps prompt contents out of ps output.
+    const args = ["--output-format", "stream-json"];
     if (schemaPath) args.push("--json-schema", schemaPath);
     if (options.model) args.push("--model", options.model);
     if (options.effort) args.push("--effort", options.effort);
@@ -160,11 +164,21 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     const child = spawn(options.binary, args, {
       cwd: options.cwd,
       env: buildAgyEnvironment(options.sanitizeAccountEnvironment),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: false,
       detached: process.platform !== "win32",
     });
+
+    let stdinFailure: Error | undefined;
+    if (!child.stdin) {
+      stdinFailure = new Error("agy stdin pipe was not created");
+    } else {
+      child.stdin.once("error", (error) => {
+        stdinFailure = error;
+      });
+      child.stdin.end(options.prompt, "utf8");
+    }
 
     const completion = new Promise<{
       code: number | null;
@@ -306,6 +320,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
 
     if (exit.error) {
       throw new AgyRunError(`Could not start ${options.binary}: ${exit.error.message}`, failureDetails());
+    }
+    if (stdinFailure) {
+      throw new AgyRunError(`Could not send prompt to ${options.binary} over stdin: ${stdinFailure.message}`, failureDetails());
     }
     if (aborted || options.signal?.aborted) {
       throw new AgyRunError("agy run was aborted", failureDetails());
