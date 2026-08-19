@@ -147,7 +147,7 @@ console.log(
         output_tokens: 4,
         thinking_tokens: 0,
         cache_read_tokens: 2,
-        total_tokens: 14,
+        total_tokens: 16,
       },
     },
   }),
