@@ -9,6 +9,7 @@ if (promptIndex < 0 || !args[promptIndex + 1]) {
 }
 const prompt = args[promptIndex + 1];
 const plain = prompt.includes("FAKE:PLAIN");
+const correctiveRetry = prompt.includes("# Mandatory provider retry correction");
 
 if (prompt.includes("FAKE:INVALID")) {
   console.log("not-json");
@@ -25,7 +26,11 @@ if (prompt.includes("FAKE:CHILD")) {
   continueForever();
 }
 
-const structured = { text: "ok", tool_calls: [], finish_reason: "stop" };
+const structured = {
+  text: prompt.includes("FAKE:REPORT_CWD") ? process.cwd() : "ok",
+  tool_calls: [],
+  finish_reason: "stop",
+};
 console.log(
   JSON.stringify({
     event: "init",
@@ -61,7 +66,7 @@ if (prompt.includes("FAKE:TOOL")) {
   );
 }
 
-if (prompt.includes("FAKE:RECIPIENT_NOT_FOUND")) {
+if (prompt.includes("FAKE:RECIPIENT_NOT_FOUND") && !correctiveRetry) {
   for (const state of ["ACTIVE", "DONE"]) {
     console.log(
       JSON.stringify({
