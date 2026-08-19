@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   assertProviderHarnessIsToolless,
   providerHarnessActivitySummary,
+  retryableFailedProviderControlToolNames,
   retryableProviderControlToolNames,
   unexpectedProviderHarnessToolSteps,
   uniqueAgyToolSteps,
@@ -82,6 +83,63 @@ test("retryableProviderControlToolNames rejects mutating AGY control actions", (
   ]) {
     assert.equal(retryableProviderControlToolNames([event]), undefined);
   }
+});
+
+test("retryableFailedProviderControlToolNames accepts a rejected send_message with no delivery", () => {
+  const toolSteps = [
+    toolEvent("ACTIVE", 4, "send_message", { to: "omp", message: "done" }),
+    toolEvent("DONE", 4, "send_message", { to: "omp", message: "done" }),
+  ];
+  assert.deepEqual(
+    retryableFailedProviderControlToolNames({
+      message: 'agy failed: recipient "omp" not found',
+      status: "ERROR",
+      terminal: { status: "ERROR", error: 'recipient "omp" not found' },
+      toolSteps,
+      subagents: [],
+    }),
+    ["send_message"],
+  );
+});
+
+test("retryableFailedProviderControlToolNames supports old AGY errors without tool lifecycle events", () => {
+  assert.deepEqual(
+    retryableFailedProviderControlToolNames({
+      message: "agy failed",
+      status: "ERROR",
+      terminal: { status: "ERROR", error: "recipient 'omp' not found" },
+      toolSteps: [],
+      subagents: [],
+    }),
+    ["send_message"],
+  );
+});
+
+test("retryableFailedProviderControlToolNames rejects ambiguous or unsafe failures", () => {
+  const send = toolEvent("DONE", 1, "send_message", { to: "omp", message: "x" });
+  const read = toolEvent("DONE", 2, "read_file", { path: "README.md" });
+  const base = {
+    message: 'agy failed: recipient "omp" not found',
+    status: "ERROR",
+    terminal: { status: "ERROR", error: 'recipient "omp" not found' },
+    subagents: [] as unknown[],
+  };
+  assert.equal(
+    retryableFailedProviderControlToolNames({ ...base, status: "SUCCESS", terminal: { status: "SUCCESS" }, toolSteps: [send] }),
+    undefined,
+  );
+  assert.equal(
+    retryableFailedProviderControlToolNames({ ...base, terminal: { status: "ERROR", error: "permission denied" }, toolSteps: [send] }),
+    undefined,
+  );
+  assert.equal(
+    retryableFailedProviderControlToolNames({ ...base, toolSteps: [send, read] }),
+    undefined,
+  );
+  assert.equal(
+    retryableFailedProviderControlToolNames({ ...base, toolSteps: [send], subagents: [{ role: "worker" }] }),
+    undefined,
+  );
 });
 
 test("assertProviderHarnessIsToolless allows duplicate read lifecycle events for an exact staged image", () => {
