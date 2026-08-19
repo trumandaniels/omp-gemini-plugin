@@ -152,9 +152,6 @@ export interface FailedProviderHarnessAttempt {
 }
 
 function failedAttemptDiagnostic(attempt: FailedProviderHarnessAttempt): string {
-  // Prefer the terminal provider diagnostic when AGY supplied one. Do not let a
-  // generic wrapper message containing stale text override a contradictory
-  // terminal error; the retry classifier must prove non-delivery fail-closed.
   const terminalError = attempt.terminal?.error?.trim();
   if (terminalError) return terminalError;
   return [attempt.message, attempt.stderr]
@@ -163,10 +160,9 @@ function failedAttemptDiagnostic(attempt: FailedProviderHarnessAttempt): string 
 }
 
 /**
- * Classify the one failed AGY action that is safe to discard and retry: a
- * `send_message` attempt rejected because its recipient does not exist. Since
- * AGY confirms non-delivery, no message side effect occurred. Every other
- * failed control, file, command, MCP, or subagent action remains fail-closed.
+ * Retry only an observed `send_message` invocation whose terminal diagnostic
+ * explicitly proves non-delivery. Missing lifecycle evidence remains ambiguous
+ * and therefore fail-closed.
  */
 export function retryableFailedProviderControlToolNames(
   attempt: FailedProviderHarnessAttempt,
@@ -180,11 +176,7 @@ export function retryableFailedProviderControlToolNames(
   }
 
   const unexpected = unexpectedProviderHarnessToolSteps(attempt.toolSteps, options);
-  if (unexpected.length === 0) {
-    // Older AGY builds may emit only the terminal recipient-not-found error and
-    // omit the failed tool lifecycle event. The diagnostic proves non-delivery.
-    return ["send_message"];
-  }
+  if (unexpected.length === 0) return undefined;
   if (unexpected.some((event) => normalizedToolName(toolStepName(event)) !== "sendmessage")) {
     return undefined;
   }
