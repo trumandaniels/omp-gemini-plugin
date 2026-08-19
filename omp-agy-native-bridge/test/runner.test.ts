@@ -33,6 +33,9 @@ test("runAgy parses official stream-json shape", async () => {
     finish_reason: "stop",
   });
   assert.equal(result.toolSteps.length, 0);
+  assert.equal(result.toolStepCount, 0);
+  assert.equal(result.subagentCount, 0);
+  assert.equal(result.eventCount, 3);
 });
 
 test("runAgy accepts successful plain-text responses without structured_output", async () => {
@@ -86,7 +89,9 @@ test("runAgy captures nested Antigravity tool and subagent metadata", async () =
     sanitizeAccountEnvironment: true,
   });
   assert.equal(result.toolSteps.length, 1);
+  assert.equal(result.toolStepCount, 1);
   assert.equal(result.subagents.length, 1);
+  assert.equal(result.subagentCount, 1);
   assert.equal(result.subagents[0]?.role, "reviewer");
 });
 
@@ -129,7 +134,7 @@ test("runAgy rejects non-success terminal status", async () => {
   );
 });
 
-test("runAgy preserves terminal and tool snapshots on a failed provider turn", async () => {
+test("runAgy preserves terminal and complete activity counts on a failed provider turn", async () => {
   await assert.rejects(
     runAgy({
       prompt: "FAKE:MISSING_OMP_RECIPIENT",
@@ -150,8 +155,11 @@ test("runAgy preserves terminal and tool snapshots on a failed provider turn", a
       assert.equal(error.status, "ERROR");
       assert.equal(error.terminal?.error, 'recipient "omp" not found');
       assert.equal(error.toolSteps.length, 2);
+      assert.equal(error.toolStepCount, 2);
       assert.equal(error.toolSteps[0]?.step_update.tool_name, "send_message");
       assert.equal(error.subagents.length, 0);
+      assert.equal(error.subagentCount, 0);
+      assert.equal(error.eventCount, 4);
       assert.equal(error.terminal?.usage?.total_tokens, 7);
       return true;
     },
