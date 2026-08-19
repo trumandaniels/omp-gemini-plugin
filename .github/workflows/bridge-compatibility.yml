@@ -1,0 +1,53 @@
+name: Bridge compatibility
+
+on:
+  pull_request:
+    paths:
+      - "omp-agy-native-bridge/**"
+      - ".github/workflows/bridge-compatibility.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "omp-agy-native-bridge/**"
+      - ".github/workflows/bridge-compatibility.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  current-omp-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: omp-agy-native-bridge
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install current OMP peer packages and development dependencies
+        run: npm install
+
+      - name: Syntax-check TypeScript sources
+        run: npm run check:source
+
+      - name: Run bridge unit and fake-process tests
+        run: npm test
+
+      - name: Typecheck against the installed current OMP contracts
+        run: npm run typecheck
+
+      - name: Verify package contents
+        run: npm pack --dry-run --json
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Verify the OMP extension entrypoint loads under Bun
+        run: bun -e 'await import("./src/index.ts")'
