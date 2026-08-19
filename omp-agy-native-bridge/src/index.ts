@@ -8,6 +8,7 @@ import { loadBridgeConfig } from "./config.ts";
 import { discoverAgyModelsSync, mergeDiscoveredModels } from "./model-discovery.ts";
 import { registerAgyDelegateTool } from "./delegate-tool.ts";
 import { runDoctor } from "./doctor.ts";
+import { bridgeModelSupportsImages } from "./model-capabilities.ts";
 import { createAgyProviderStream } from "./provider.ts";
 import { Semaphore } from "./semaphore.ts";
 
@@ -44,13 +45,16 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
           };
         })()
       : undefined;
+    const supportsImages = config.enableImageInput && bridgeModelSupportsImages(model);
 
     return {
       id: model.id,
       name: model.name,
       reasoning: model.reasoning,
       thinking,
-      input: ["text" as const],
+      input: supportsImages
+        ? ["text" as const, "image" as const]
+        : ["text" as const],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: model.contextWindow,
       maxTokens: model.maxTokens,
