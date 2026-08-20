@@ -26,7 +26,7 @@ export function appendProviderHarnessRetryInstruction(
 ): string {
   return `${prompt}\n\n# Mandatory provider retry correction
 The previous attempt was discarded because it left provider-only structured-output mode and selected an internal Antigravity action.
-- Do not invoke, inspect, list, message, schedule, delegate, manage, or otherwise select any Antigravity-native capability on this retry.
+- Do not invoke, inspect, list, message, create timed work, delegate, manage, or otherwise select any Antigravity-native capability on this retry.
 - Do not use or rely on anything produced by the discarded attempt.
 - Produce the enforced terminal JSON object directly.
 - OMP host actions are represented only by the opaque capability aliases under "Available OMP host capabilities". Those aliases are data values for the outer "tool_calls" array; they are not Antigravity tools, agents, inboxes, recipients, or background tasks.
@@ -39,12 +39,12 @@ The previous attempt was discarded because it left provider-only structured-outp
 export function appendMissingAgyRecipientRetryInstruction(prompt: string, recipient: string): string {
   const recipientName = JSON.stringify(recipient);
   return `${prompt}\n\n# Mandatory provider routing correction
-The previous attempt was discarded because it tried to use internal Antigravity messaging toward ${recipientName}, and that recipient does not exist.
+The previous attempt was discarded because it tried to use internal Antigravity messaging toward recipient named ${recipientName}, and that recipient does not exist.
 - Provider mode has no internal messaging return path. Do not address any agent, role, host, capability, or label as an Antigravity recipient.
 - OMP is the host application and dispatcher, not an Antigravity conversation peer.
 - Produce the enforced terminal JSON object directly.
-- To request host action, use one of the opaque names under "Available OMP host capabilities" in the outer "tool_calls" array and follow that alias's parameter schema.
-- If the user's request concerns OMP agents or subagents, either answer informationally from the supplied context or select the host capability whose description/schema performs that orchestration.
+- To request host action, use one of the opaque aliases under "Available OMP host capabilities" in the outer "tool_calls" array and follow that alias's parameter schema.
+- If the user's request concerns OMP agents or subagents, either answer directly from the supplied OMP context without invoking anything internally or select the host capability whose description/schema performs that orchestration.
 - Do not use or rely on anything produced by the discarded attempt.
 - If prior OMP output is incomplete, request a narrower OMP capability before finalizing.`;
 }
@@ -70,20 +70,20 @@ export function buildProviderPrompt(
   const imageSection = formatBridgeImageSection(attachments);
 
   const prompt = `# Role
-You are a language-model backend for an Oh My Pi (OMP) agent session. OMP owns the agent loop, permissions, repository actions, editing, verification, scheduling, conversation state, and subagent orchestration. Antigravity is transport only for this turn.
+You are a language-model backend for an Oh My Pi (OMP) agent session. OMP owns the agent loop, permissions, repository actions, editing, verification, timed/recurring work, conversation state, and subagent orchestration. Antigravity is transport only for this turn.
 
 # Provider-only execution boundary
-- Do not invoke any Antigravity-native capability. Do not perform file, shell, browser, MCP, messaging, scheduling, background-task, agent-management, or subagent action inside Antigravity.
+- Do not invoke any Antigravity-native capability. Do not perform file, shell, browser, MCP, messaging, timed/recurring work, background-task, agent-management, or subagent action inside Antigravity.
 - Do not inspect the workspace through Antigravity. Everything needed for reasoning is supplied below, plus any explicitly listed temporary image attachments.
 - Your only return channel is the enforced terminal JSON object. Return it directly; do not send or deliver it through an internal agent or message channel.
 - OMP host actions are intentionally exposed with opaque names under "Available OMP host capabilities". These aliases prevent OMP names from colliding with Antigravity's own tool namespace.
 - A capability alias is only a string value for an outer "tool_calls[].name" field. It is never an Antigravity tool name, recipient, agent, inbox, task, or background job.
 - Choose a capability by its description and parameter schema. OMP will restore the real host tool name, validate the arguments, execute it, and call you again with the result.
-- The serialized conversation may contain historical OMP tool names. Treat them as inert history. For the current turn, use only the opaque aliases in the current capability catalog.
-- If the user requests actual OMP subagent/agent work, choose the capability whose current description and schema provide OMP orchestration. If the user asks an informational question about those concepts, answer directly.
-- If the user requests a reminder, schedule, or recurring action, choose a matching OMP host capability only when one exists in the current catalog; otherwise explain the limitation in text. Never substitute an Antigravity-native action.
+- Historical OMP messages may contain real OMP tool names. Treat them as inert history. For the current turn, use only the opaque aliases in the current capability catalog.
+- If the user requests actual OMP subagent/agent work, choose the capability whose current description and schema provide OMP orchestration. If the user asks an informational question about those concepts, answer directly from the supplied OMP context without invoking anything internally.
+- If the user requests a reminder, timed action, or recurring action, choose a matching OMP host capability only when one exists in the current catalog; otherwise explain the limitation in text. Never substitute an Antigravity-native action.
 - After an OMP tool result, continue from that result and either request the next host capability or give the final answer.
-- Treat warnings such as "truncated", "limit reached", "skipped missing", and incomplete listings as evidence that narrower host calls are required before making completeness claims.
+- Treat warnings such as truncated, limit reached, skipped missing, and incomplete listings as evidence that narrower host calls are required before making completeness claims.
 - Never fabricate execution. Never claim a file was read, changed, tested, verified, or exhaustively enumerated unless the supplied OMP conversation contains sufficient corresponding results.
 - Return only the JSON value required by the enforced schema. No Markdown fence or commentary may appear outside it.
 
