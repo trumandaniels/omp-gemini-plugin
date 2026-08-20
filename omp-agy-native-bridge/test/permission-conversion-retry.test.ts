@@ -119,7 +119,7 @@ test("permission-conversion recovery permits only exact staged-media hydration r
   );
 });
 
-test("runProviderAttempts retries a permission-conversion failure and succeeds", async () => {
+test("runProviderAttempts retries a permission-conversion failure without echoing the tool name", async () => {
   const prompts: string[] = [];
   let calls = 0;
   const outcome = await runProviderAttempts({
@@ -138,11 +138,12 @@ test("runProviderAttempts retries a permission-conversion failure and succeeds",
   assert.equal(outcome.discardedUsage.length, 1);
   assert.equal(outcome.result.terminal.status, "SUCCESS");
   assert.equal(prompts[0], "original OMP provider prompt");
-  assert.match(prompts[1] ?? "", /forbidden Antigravity control tool\(s\): schedule/i);
-  assert.match(prompts[1] ?? "", /Do not invoke any Antigravity tool on this retry/i);
+  assert.match(prompts[1] ?? "", /internal Antigravity action/i);
+  assert.match(prompts[1] ?? "", /enforced terminal JSON object/i);
+  assert.doesNotMatch(prompts[1] ?? "", /\bschedule\b/i);
 });
 
-test("runProviderAttempts recovers repeated manage_task permission-conversion failures", async () => {
+test("runProviderAttempts recovers repeated manage_task failures without reinforcing manage_task", async () => {
   const prompts: string[] = [];
   let calls = 0;
   const outcome = await runProviderAttempts({
@@ -160,12 +161,12 @@ test("runProviderAttempts recovers repeated manage_task permission-conversion fa
   assert.equal(outcome.attempts, 4);
   assert.equal(outcome.discardedUsage.length, 3);
   assert.equal(outcome.result.terminal.status, "SUCCESS");
-  assert.match(prompts[1] ?? "", /manage_task/i);
+  for (const prompt of prompts.slice(1)) assert.doesNotMatch(prompt, /manage_task/i);
   assert.match(prompts[2] ?? "", /Repeated provider transport correction/i);
   assert.match(prompts[3] ?? "", /safe recovery attempt 3/i);
 });
 
-test("permission-conversion recovery accumulates different AGY tool names", async () => {
+test("different AGY permission failures remain de-salienced across retries", async () => {
   const prompts: string[] = [];
   let calls = 0;
   const outcome = await runProviderAttempts({
@@ -183,7 +184,9 @@ test("permission-conversion recovery accumulates different AGY tool names", asyn
 
   assert.equal(outcome.attempts, 3);
   assert.equal(outcome.discardedUsage.length, 2);
-  assert.match(prompts[2] ?? "", /manage_task, schedule|schedule, manage_task/i);
+  assert.doesNotMatch(prompts[1] ?? "", /\bschedule\b|manage_task/i);
+  assert.doesNotMatch(prompts[2] ?? "", /\bschedule\b|manage_task/i);
+  assert.match(prompts[2] ?? "", /Repeated provider transport correction/i);
 });
 
 test("runProviderAttempts bounds repeated permission-conversion recovery", async () => {
