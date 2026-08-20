@@ -1,4 +1,4 @@
-import * as PiAI from "@oh-my-pi/pi-ai";
+import { toolWireSchema as ompToolWireSchema } from "@oh-my-pi/pi-ai/utils/schema/wire";
 
 import type { BridgeStructuredOutput } from "./types.ts";
 
@@ -340,16 +340,13 @@ export function parameterSchema(parameters: unknown): Record<string, unknown> {
 }
 
 function hostToolParameterSchema(tool: ToolLike): Record<string, unknown> | undefined {
-  const host = (PiAI as unknown as {
-    toolWireSchema?: (tool: ToolLike) => Record<string, unknown>;
-  }).toolWireSchema;
-  if (typeof host !== "function") return undefined;
   try {
-    const cloned = jsonClone(host(tool));
+    const convert = ompToolWireSchema as unknown as (tool: ToolLike) => Record<string, unknown>;
+    const cloned = jsonClone(convert(tool));
     return isRecord(cloned) ? cloned : undefined;
   } catch {
-    // Older/newer host schema internals must never make the bridge unload. Fall
-    // back to the compatibility converter below.
+    // Host schema conversion is an optimization, not a loading invariant. Keep a
+    // local compatibility converter as the fail-safe for older or changed OMPs.
     return undefined;
   }
 }
