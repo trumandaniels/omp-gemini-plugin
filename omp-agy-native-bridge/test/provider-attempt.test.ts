@@ -251,7 +251,7 @@ test("runProviderAttempts forwards staged-media guard options to recipient recov
   assert.equal(outcome.result.terminal.status, "SUCCESS");
 });
 
-test("runProviderAttempts retries a missing OMP tool recipient through structured tool guidance", async () => {
+test("runProviderAttempts retries a missing OMP tool recipient through opaque capability guidance", async () => {
   const prompts: string[] = [];
   const outcome = await runProviderAttempts({
     initialPrompt: "Use read to inspect package.json",
@@ -267,11 +267,12 @@ test("runProviderAttempts retries a missing OMP tool recipient through structure
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.discardedUsage.length, 1);
   assert.match(prompts[1] ?? "", /recipient named "read"/);
-  assert.match(prompts[1] ?? "", /OMP tool names such as read, glob, grep, bash/);
+  assert.match(prompts[1] ?? "", /opaque aliases/);
   assert.match(prompts[1] ?? "", /outer "tool_calls" array/);
+  assert.doesNotMatch(prompts[1] ?? "", /OMP tool names such as read, glob, grep, bash/);
 });
 
-test("runProviderAttempts retries recipient subagent with explicit OMP task guidance", async () => {
+test("runProviderAttempts retries recipient subagent through generic OMP orchestration guidance", async () => {
   const prompts: string[] = [];
   const outcome = await runProviderAttempts({
     initialPrompt: "Have a subagent audit the UI",
@@ -287,8 +288,9 @@ test("runProviderAttempts retries recipient subagent with explicit OMP task guid
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.discardedUsage.length, 1);
   assert.match(prompts[1] ?? "", /recipient named "subagent"/);
-  assert.match(prompts[1] ?? "", /never send_message to a recipient named "subagent"/);
-  assert.match(prompts[1] ?? "", /request the OMP "task" tool when available/);
+  assert.match(prompts[1] ?? "", /OMP agents or subagents/);
+  assert.match(prompts[1] ?? "", /host capability whose description\/schema performs that orchestration/);
+  assert.doesNotMatch(prompts[1] ?? "", /request the OMP "task" tool/);
 });
 
 test("runProviderAttempts uses one final attempt when the corrected retry still messages OMP", async () => {
@@ -310,8 +312,8 @@ test("runProviderAttempts uses one final attempt when the corrected retry still 
   assert.equal(outcome.discardedUsage[1]?.total_tokens, 7);
   assert.match(prompts[1] ?? "", /recipient named "omp"/);
   assert.match(prompts[2] ?? "", /Final provider routing correction/);
-  assert.match(prompts[2] ?? "", /final safe recovery attempt/);
-  assert.match(prompts[2] ?? "", /DO NOT invoke any Antigravity tool of any kind/);
+  assert.match(prompts[2] ?? "", /final safe routing recovery/);
+  assert.match(prompts[2] ?? "", /Do not select any Antigravity-native capability/);
   assert.match(prompts[2] ?? "", /outer "tool_calls" array/);
 });
 
@@ -334,6 +336,7 @@ test("runProviderAttempts never performs a fourth AGY attempt after repeated mis
 
 test("runProviderAttempts retries a successful read-only AGY control probe once", async () => {
   let calls = 0;
+  const prompts: string[] = [];
   const listEvent: AgyStepUpdateEvent = {
     event: "step_update",
     step_update: {
@@ -350,7 +353,8 @@ test("runProviderAttempts retries a successful read-only AGY control probe once"
     initialPrompt: "prompt",
     enforceToolless: true,
     agentName: "omp-bridge-model",
-    invoke: async () => {
+    invoke: async (prompt) => {
+      prompts.push(prompt);
       calls += 1;
       return calls === 1 ? successfulResult([listEvent]) : successfulResult();
     },
@@ -358,6 +362,8 @@ test("runProviderAttempts retries a successful read-only AGY control probe once"
 
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.discardedUsage.length, 1);
+  assert.doesNotMatch(prompts[1] ?? "", /manage_subagents/i);
+  assert.match(prompts[1] ?? "", /internal Antigravity action/i);
 });
 
 test("runProviderAttempts does not retry a control probe from a truncated snapshot", async () => {
