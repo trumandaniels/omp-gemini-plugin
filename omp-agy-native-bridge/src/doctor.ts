@@ -148,25 +148,29 @@ async function captureAgents(
   config: Pick<BridgeConfig, "agyBinary" | "sanitizeAccountEnvironment">,
   cwd: string,
 ): Promise<{ code: number | null; stdout: string; stderr: string; names: string[] }> {
-  const machine = await capture(
-    config.agyBinary,
-    ["agents", "--output-format", "json"],
-    cwd,
-    config.sanitizeAccountEnvironment,
-  );
-  const machineNames = machine.code === 0 ? parseAgyAgentsOutput(machine.stdout) : [];
-  if (machineNames.length > 0) return { ...machine, names: machineNames };
-
+  // AGY 1.1.x supports only the plain `agents` listing. Prefer that stable
+  // surface instead of deliberately issuing an unsupported format flag on every
+  // doctor run. Retain the machine-readable probe as a compatibility fallback
+  // for a future CLI whose plain output is successful but unrecognized.
   const plain = await capture(
     config.agyBinary,
     ["agents"],
     cwd,
     config.sanitizeAccountEnvironment,
   );
+  const plainNames = plain.code === 0 ? parseAgyAgentsOutput(plain.stdout) : [];
+  if (plain.code !== 0 || plainNames.length > 0) return { ...plain, names: plainNames };
+
+  const machine = await capture(
+    config.agyBinary,
+    ["agents", "--output-format", "json"],
+    cwd,
+    config.sanitizeAccountEnvironment,
+  );
   return {
-    ...plain,
-    stderr: [machine.stderr.trim(), plain.stderr.trim()].filter(Boolean).join("\n"),
-    names: plain.code === 0 ? parseAgyAgentsOutput(plain.stdout) : [],
+    ...machine,
+    stderr: [plain.stderr.trim(), machine.stderr.trim()].filter(Boolean).join("\n"),
+    names: machine.code === 0 ? parseAgyAgentsOutput(machine.stdout) : [],
   };
 }
 
