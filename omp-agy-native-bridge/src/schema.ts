@@ -16,6 +16,7 @@ export interface SerializedTool {
 
 const MAX_NESTED_OBJECT_OUTPUT_DEPTH = 4;
 const MAX_STRUCTURED_TEXT_DEPTH = 16;
+const TEXT_BLOCK_TYPES = new Set(["text", "input_text", "output_text"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -28,12 +29,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `text` and `tool_calls` are optional at the compatibility boundary because
  * empty text is normal for tool turns and an omitted/nullable tool list means
  * "no tool calls". The parser still rejects an output with no semantic content.
+ * Content-block objects are explicitly excluded so arrays of `{type:"text"}`
+ * blocks are flattened as text rather than mistaken for nested bridge envelopes.
  */
 function isBridgeEnvelope(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false;
   const hasText = Object.prototype.hasOwnProperty.call(value, "text");
   const hasToolCalls = Object.prototype.hasOwnProperty.call(value, "tool_calls");
   if (!hasText && !hasToolCalls) return false;
+  if (!hasToolCalls && typeof value.type === "string" && TEXT_BLOCK_TYPES.has(value.type)) return false;
   return value.tool_calls === undefined || value.tool_calls === null || Array.isArray(value.tool_calls);
 }
 
