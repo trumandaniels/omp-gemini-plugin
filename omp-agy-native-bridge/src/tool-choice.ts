@@ -1,0 +1,65 @@
+import type { ToolChoice } from "@oh-my-pi/pi-ai";
+
+import type { ToolLike } from "./schema.ts";
+
+export interface BridgeToolChoiceResolution {
+  tools: readonly ToolLike[];
+  requireToolCall: boolean;
+  requiredToolName?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function namedToolChoice(choice: ToolChoice | undefined): string | undefined {
+  if (!choice || typeof choice === "string") return undefined;
+  if (choice.type === "computer") return "computer";
+
+  const value = choice as unknown as Record<string, unknown>;
+  if (typeof value.name === "string" && value.name.trim() !== "") return value.name;
+  const fn = value.function;
+  if (isRecord(fn) && typeof fn.name === "string" && fn.name.trim() !== "") return fn.name;
+  return undefined;
+}
+
+/**
+ * Translate OMP's provider-agnostic tool choice into the bridge's tool catalog.
+ *
+ * Named choices are implemented by narrowing the catalog to exactly that tool,
+ * which works even though AGY itself has no OMP-native tool-choice parameter.
+ * `none` removes the catalog entirely. `required`/`any` keep the active catalog
+ * but require at least one validated OMP tool call in the terminal envelope.
+ */
+export function resolveBridgeToolChoice(
+  tools: readonly ToolLike[],
+  choice: ToolChoice | undefined,
+): BridgeToolChoiceResolution {
+  if (choice === "none") return { tools: [], requireToolCall: false };
+
+  const named = namedToolChoice(choice);
+  if (named) {
+    const selected = tools.find((tool) => tool.name === named);
+    if (!selected) {
+      throw new Error(`OMP tool choice requires unavailable tool: ${named}`);
+    }
+    return { tools: [selected], requireToolCall: true, requiredToolName: named };
+  }
+
+  const requireToolCall = choice === "required" || choice === "any";
+  if (requireToolCall && tools.length === 0) {
+    throw new Error("OMP tool choice requires a tool call, but this turn has no available OMP tools");
+  }
+  return { tools, requireToolCall };
+}
+
+export function appendToolChoiceInstruction(
+  prompt: string,
+  resolution: Pick<BridgeToolChoiceResolution, "requireToolCall" | "requiredToolName">,
+): string {
+  if (!resolution.requireToolCall) return prompt;
+  const target = resolution.requiredToolName
+    ? `the OMP tool ${JSON.stringify(resolution.requiredToolName)}`
+    : "at least one available OMP tool";
+  return `${prompt}\n\n# OMP tool-choice constraint\nThis turn is tool-forced by the OMP caller. Return ${target} in the outer \"tool_calls\" array. Do not answer with text only, and do not use any Antigravity tool.`;
+}
