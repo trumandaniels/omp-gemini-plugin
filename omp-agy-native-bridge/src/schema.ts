@@ -231,6 +231,34 @@ function sanitizeJsonValue(value: unknown, path: string, depth = 0): unknown {
   return result;
 }
 
+function normalizeToolArguments(value: unknown, index: number): Record<string, unknown> {
+  let candidate = value;
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch {
+      throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+    }
+  }
+  if (!isRecord(candidate)) {
+    throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+  }
+  return sanitizeJsonValue(candidate, `tool_calls[${index}].arguments`) as Record<string, unknown>;
+}
+
+function normalizeToolCallId(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  // Tool-call ids are correlation metadata, not model intent. Invalid ids are
+  // omitted so provider.ts can synthesize a fresh UUID instead of failing an
+  // otherwise valid tool request.
+  return undefined;
+}
+
 function jsonClone(value: unknown): unknown {
   const seen = new WeakSet<object>();
   const encoded = JSON.stringify(value, (_key, item: unknown) => {
@@ -338,9 +366,14 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
     type: "object",
     additionalProperties: false,
     properties: {
-      id: { type: "string" },
+      // `id` and `arguments` are intentionally permissive at the AGY schema
+      // boundary. The bridge normalizes correlation ids and fully validates /
+      // sanitizes arguments before OMP sees a call. Keeping the outer schema
+      // looser prevents recoverable model-wrapper representation drift from
+      // becoming an upstream structured-output failure.
+      id: {},
       name: uniqueNames.length > 0 ? { type: "string", enum: uniqueNames } : { type: "string" },
-      arguments: { type: "object" },
+      arguments: {},
     },
     required: ["name", "arguments"],
   };
@@ -350,7 +383,10 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
     type: "object",
     additionalProperties: false,
     properties: {
-      text: { type: "string" },
+      // Parser support is intentionally wider than plain string: AGY/model
+      // wrappers have returned null, content-block arrays, Gemini-style parts,
+      // and JSON answer objects here. None of those values controls execution.
+      text: {},
       tool_calls: uniqueNames.length > 0
         ? { type: "array", items: toolCallItems, maxItems: 32 }
         : { type: "array", maxItems: 0 },
@@ -393,20 +429,18 @@ function parseBridgeStructuredOutputInternal(
     if (typeof item.name !== "string" || !allowed.has(item.name)) {
       throw new Error(`tool_calls[${index}] named unavailable OMP tool: ${String(item.name)}`);
     }
-    if (!isRecord(item.arguments)) {
-      throw new Error(`tool_calls[${index}].arguments must be an object`);
+
+    const argumentsValue = normalizeToolArguments(item.arguments, index);
+    const id = normalizeToolCallId(item.id);
+    if (id !== undefined) {
+      if (callIds.has(id)) throw new Error(`Duplicate tool call id: ${id}`);
+      callIds.add(id);
     }
-    if (item.id !== undefined && (typeof item.id !== "string" || item.id.trim() === "")) {
-      throw new Error(`tool_calls[${index}].id must be a non-empty string when supplied`);
-    }
-    if (typeof item.id === "string") {
-      if (callIds.has(item.id)) throw new Error(`Duplicate tool call id: ${item.id}`);
-      callIds.add(item.id);
-    }
+
     return {
-      ...(typeof item.id === "string" ? { id: item.id } : {}),
+      ...(id === undefined ? {} : { id }),
       name: item.name,
-      arguments: sanitizeJsonValue(item.arguments, `tool_calls[${index}].arguments`) as Record<string, unknown>,
+      arguments: argumentsValue,
     };
   });
 
