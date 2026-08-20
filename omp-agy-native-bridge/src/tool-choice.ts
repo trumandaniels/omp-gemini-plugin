@@ -1,6 +1,7 @@
 import type { ToolChoice } from "@oh-my-pi/pi-ai";
 
 import type { ToolLike } from "./schema.ts";
+import type { BridgeStructuredOutput } from "./types.ts";
 
 export interface BridgeToolChoiceResolution {
   tools: readonly ToolLike[];
@@ -62,4 +63,26 @@ export function appendToolChoiceInstruction(
     ? `the OMP tool ${JSON.stringify(resolution.requiredToolName)}`
     : "at least one available OMP tool";
   return `${prompt}\n\n# OMP tool-choice constraint\nThis turn is tool-forced by the OMP caller. Return ${target} in the outer \"tool_calls\" array. Do not answer with text only, and do not use any Antigravity tool.`;
+}
+
+/** Fail closed when AGY ignores a host-level forced-tool requirement. */
+export function assertBridgeToolChoiceSatisfied(
+  output: Pick<BridgeStructuredOutput, "tool_calls">,
+  resolution: Pick<BridgeToolChoiceResolution, "requireToolCall" | "requiredToolName">,
+): void {
+  if (!resolution.requireToolCall) return;
+  if (output.tool_calls.length === 0) {
+    const target = resolution.requiredToolName
+      ? `OMP tool ${JSON.stringify(resolution.requiredToolName)}`
+      : "an OMP tool call";
+    throw new Error(`AGY returned no tool call, but this OMP turn requires ${target}`);
+  }
+  if (
+    resolution.requiredToolName
+    && output.tool_calls.some((call) => call.name !== resolution.requiredToolName)
+  ) {
+    throw new Error(
+      `AGY violated OMP tool choice: expected only ${resolution.requiredToolName}`,
+    );
+  }
 }
