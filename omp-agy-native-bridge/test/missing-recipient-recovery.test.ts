@@ -7,10 +7,9 @@ import { runProviderAttempts } from "../src/provider-attempt.ts";
 import type { SerializedTool } from "../src/schema.ts";
 import type { AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
 
-function sendMessageEvent(
+function sendMessageParametersEvent(
   state: string,
-  recipient: string,
-  message: string,
+  parameters: Record<string, unknown>,
 ): AgyStepUpdateEvent {
   return {
     event: "step_update",
@@ -22,10 +21,18 @@ function sendMessageEvent(
       tool_name: "send_message",
       tool_info: {
         name: "send_message",
-        parameters: { recipient, message },
+        parameters,
       },
     },
   };
+}
+
+function sendMessageEvent(
+  state: string,
+  recipient: string,
+  message: string,
+): AgyStepUpdateEvent {
+  return sendMessageParametersEvent(state, { recipient, message });
 }
 
 function missingRecipientError(
@@ -150,6 +157,63 @@ test("failed send_message to subagent becomes an OMP batch task call", () => {
   });
 });
 
+test("failed send_message to literal task becomes the real OMP task tool call", () => {
+  const result = synthesizeMissingRecipientRecovery(
+    missingRecipientError("task", "Audit the website UI and UX and return concrete fixes."),
+    "task",
+    [batchTaskTool],
+  );
+
+  assert.deepEqual(result?.terminal.structured_output, {
+    text: "",
+    tool_calls: [
+      {
+        name: "task",
+        arguments: {
+          context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
+          tasks: [{ task: "Audit the website UI and UX and return concrete fixes." }],
+        },
+      },
+    ],
+    finish_reason: "tool_use",
+  });
+});
+
+test("task recovery accepts AGY casing and nested parameter variants", () => {
+  const taskText = "Inspect portal-shell.tsx and fix the UI distinction without running project-wide validation.";
+  const error = missingRecipientError("task", "unused", {
+    toolSteps: [
+      sendMessageParametersEvent("ACTIVE", {
+        Input: {
+          Recipient: "task",
+          Message: { Text: taskText },
+        },
+      }),
+      sendMessageParametersEvent("DONE", {
+        input: {
+          recipient_name: "task",
+          content: { text: taskText },
+        },
+      }),
+    ],
+  });
+
+  const result = synthesizeMissingRecipientRecovery(error, "task", [batchTaskTool]);
+  assert.deepEqual(result?.terminal.structured_output, {
+    text: "",
+    tool_calls: [
+      {
+        name: "task",
+        arguments: {
+          context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
+          tasks: [{ task: taskText }],
+        },
+      },
+    ],
+    finish_reason: "tool_use",
+  });
+});
+
 test("failed send_message to subagent respects the flat OMP task schema", () => {
   const result = synthesizeMissingRecipientRecovery(
     missingRecipientError("subagent", "Inspect portal-shell.tsx."),
@@ -169,7 +233,7 @@ test("failed send_message to subagent respects the flat OMP task schema", () => 
   });
 });
 
-test("deterministic recovery refuses ambiguous, control-only, or unsupported routing", () => {
+test("deterministic recovery refuses ambiguous, control-only, unsupported, or underivable task schemas", () => {
   const ambiguous = missingRecipientError("subagent", "first task", {
     toolSteps: [
       sendMessageEvent("ACTIVE", "subagent", "first task"),
@@ -201,6 +265,26 @@ test("deterministic recovery refuses ambiguous, control-only, or unsupported rou
     ),
     undefined,
   );
+
+  const taskWithUnknownRequiredField: SerializedTool = {
+    ...batchTaskTool,
+    parameters: {
+      ...batchTaskTool.parameters,
+      properties: {
+        ...(batchTaskTool.parameters.properties as Record<string, unknown>),
+        mystery: { type: "string" },
+      },
+      required: ["context", "tasks", "mystery"],
+    },
+  };
+  assert.equal(
+    synthesizeMissingRecipientRecovery(
+      missingRecipientError("task", "Audit the UI and return concrete fixes."),
+      "task",
+      [taskWithUnknownRequiredField],
+    ),
+    undefined,
+  );
 });
 
 test("provider attempts short-circuit a proven subagent routing failure into OMP task", async () => {
@@ -228,6 +312,45 @@ test("provider attempts short-circuit a proven subagent routing failure into OMP
         arguments: {
           context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
           tasks: [{ task: "Audit the website UI and UX and return concrete fixes." }],
+        },
+      },
+    ],
+    finish_reason: "tool_use",
+  });
+});
+
+test("provider attempts short-circuit recipient task with AGY parameter casing into OMP task", async () => {
+  let calls = 0;
+  const taskText = "Audit the website UI and UX and return concrete fixes without running project-wide validation.";
+  const error = missingRecipientError("task", "unused", {
+    toolSteps: [
+      sendMessageParametersEvent("ACTIVE", { Recipient: "task", Message: taskText }),
+      sendMessageParametersEvent("DONE", { Recipient: "task", Message: taskText }),
+    ],
+  });
+
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Have a subagent audit the UI",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    ompTools: [batchTaskTool],
+    invoke: async () => {
+      calls += 1;
+      throw error;
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.deepEqual(outcome.result.terminal.structured_output, {
+    text: "",
+    tool_calls: [
+      {
+        name: "task",
+        arguments: {
+          context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
+          tasks: [{ task: taskText }],
         },
       },
     ],
