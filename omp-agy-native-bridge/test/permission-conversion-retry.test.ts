@@ -11,6 +11,8 @@ import type { AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
 
 const SCHEDULE_DIAGNOSTIC =
   "declaring permissions: cortex tool schedule: convert tool call for permissions: model output error: invalid tool call error (invalid_args) malformed schedule request";
+const MANAGE_TASK_DIAGNOSTIC =
+  "declaring permissions: cortex tool manage_task: convert tool call for permissions: model output error: invalid tool call error (invalid_args) malformed task request";
 
 function permissionConversionError(
   diagnostic = SCHEDULE_DIAGNOSTIC,
@@ -69,10 +71,10 @@ test("classifies AGY schedule permission-conversion failures as retryable", () =
   assert.equal(retryablePermissionConversionTool(permissionConversionError()), "schedule");
 });
 
-test("does not retry arbitrary AGY permission-conversion failures", () => {
+test("classifies future AGY tool names when permission conversion failed before execution", () => {
   const diagnostic =
-    "declaring permissions: cortex tool view_file: convert tool call for permissions: model output error: invalid tool call error (invalid_args) failed to read file";
-  assert.equal(retryablePermissionConversionTool(permissionConversionError(diagnostic)), undefined);
+    "declaring permissions: cortex tool future_control_tool: convert tool call for permissions: model output error: invalid tool call error (invalid_args) bad request";
+  assert.equal(retryablePermissionConversionTool(permissionConversionError(diagnostic)), "future_control_tool");
 });
 
 test("permission-conversion recovery fails closed on truncated activity or subagents", () => {
@@ -117,7 +119,7 @@ test("permission-conversion recovery permits only exact staged-media hydration r
   );
 });
 
-test("runProviderAttempts retries a schedule permission-conversion failure once", async () => {
+test("runProviderAttempts retries a permission-conversion failure and succeeds", async () => {
   const prompts: string[] = [];
   let calls = 0;
   const outcome = await runProviderAttempts({
@@ -140,7 +142,51 @@ test("runProviderAttempts retries a schedule permission-conversion failure once"
   assert.match(prompts[1] ?? "", /Do not invoke any Antigravity tool on this retry/i);
 });
 
-test("runProviderAttempts never performs a third attempt after permission-conversion recovery", async () => {
+test("runProviderAttempts recovers repeated manage_task permission-conversion failures", async () => {
+  const prompts: string[] = [];
+  let calls = 0;
+  const outcome = await runProviderAttempts({
+    initialPrompt: "original OMP provider prompt",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      calls += 1;
+      if (calls <= 3) throw permissionConversionError(MANAGE_TASK_DIAGNOSTIC);
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 4);
+  assert.equal(outcome.discardedUsage.length, 3);
+  assert.equal(outcome.result.terminal.status, "SUCCESS");
+  assert.match(prompts[1] ?? "", /manage_task/i);
+  assert.match(prompts[2] ?? "", /Repeated provider transport correction/i);
+  assert.match(prompts[3] ?? "", /safe recovery attempt 3/i);
+});
+
+test("permission-conversion recovery accumulates different AGY tool names", async () => {
+  const prompts: string[] = [];
+  let calls = 0;
+  const outcome = await runProviderAttempts({
+    initialPrompt: "prompt",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      calls += 1;
+      if (calls === 1) throw permissionConversionError(SCHEDULE_DIAGNOSTIC);
+      if (calls === 2) throw permissionConversionError(MANAGE_TASK_DIAGNOSTIC);
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 3);
+  assert.equal(outcome.discardedUsage.length, 2);
+  assert.match(prompts[2] ?? "", /manage_task, schedule|schedule, manage_task/i);
+});
+
+test("runProviderAttempts bounds repeated permission-conversion recovery", async () => {
   let calls = 0;
   await assert.rejects(
     runProviderAttempts({
@@ -149,10 +195,10 @@ test("runProviderAttempts never performs a third attempt after permission-conver
       agentName: "omp-bridge-model",
       invoke: async () => {
         calls += 1;
-        throw permissionConversionError();
+        throw permissionConversionError(MANAGE_TASK_DIAGNOSTIC);
       },
     }),
-    /cortex tool schedule/i,
+    /cortex tool manage_task/i,
   );
-  assert.equal(calls, 2);
+  assert.equal(calls, 4);
 });
