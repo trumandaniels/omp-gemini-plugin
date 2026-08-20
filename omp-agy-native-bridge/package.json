@@ -25,8 +25,8 @@
   },
   "scripts": {
     "install-agent": "node --experimental-strip-types ./scripts/install-agent.ts",
-    "doctor": "node --experimental-strip-types ./scripts/doctor.ts",
-    "doctor:live": "node --experimental-strip-types ./scripts/doctor.ts --live",
+    "doctor": "tsx ./scripts/doctor.ts",
+    "doctor:live": "tsx ./scripts/doctor.ts --live",
     "test": "tsx --test ./test/*.test.ts",
     "check:source": "node ./scripts/check.mjs",
     "check:package": "node ./scripts/check-package.mjs",
