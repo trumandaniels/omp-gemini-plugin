@@ -444,13 +444,16 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
     },
     // Presence is a semantic question handled after normalization: text-only
     // answers may omit tool_calls, and tool-only turns may omit text.
-    required: [],
   };
 }
 
 function plainJsonAnswer(value: unknown): BridgeStructuredOutput {
+  const text = normalizeBridgeText(value);
+  if (text.length === 0) {
+    throw new Error("agy structured_output must contain text or at least one tool call");
+  }
   return {
-    text: normalizeBridgeText(value),
+    text,
     tool_calls: [],
     finish_reason: "stop",
   };
