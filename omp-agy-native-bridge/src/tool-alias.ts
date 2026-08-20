@@ -31,6 +31,11 @@ export function aliasOmpToolCatalog(catalog: readonly SerializedTool[]): Aliased
 
     const wireName = `${WIRE_PREFIX}${String(index + 1).padStart(2, "0")}`;
     wireToOmpToolName[wireName] = tool.name;
+    // Deterministic host-side recovery can synthesize an already-canonical OMP
+    // call without passing through AGY. Identity entries let the final restore
+    // step accept that trusted host result while the actual AGY schema still
+    // exposes only opaque aliases.
+    wireToOmpToolName[tool.name] = tool.name;
     ompToWireToolName[tool.name] = wireName;
     return {
       ...tool,
