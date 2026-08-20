@@ -60,7 +60,12 @@ export function resolveAgyModelSelection(
   const normalizedEffort = options?.disableReasoning === true ? "low" : normalizeReasoning(options?.reasoning);
 
   if (model.id === "auto") {
-    const effort = normalizedEffort ?? model.effort ?? defaultEffort;
+    // A custom auto entry may explicitly advertise no reasoning. In that case
+    // never forward --effort: some AGY routes reject effort on non-reasoning
+    // models, and OMP already exposes no thinking control for this model.
+    const effort = model.reasoning
+      ? normalizedEffort ?? model.effort ?? defaultEffort
+      : undefined;
     return { model: undefined, effort };
   }
 
@@ -76,10 +81,12 @@ export function resolveAgyModelSelection(
     return { model: route, effort: undefined };
   }
 
-  // Direct AGY model slugs still support the CLI's --effort flag. Apply the
-  // bridge-wide default here just as we do for auto and tiered models; otherwise
-  // AGY_BRIDGE_EFFORT/defaultEffort is silently ignored for non-tiered models.
-  const effort = normalizedEffort ?? model.effort ?? defaultEffort;
+  // Direct AGY model slugs support the CLI's --effort flag only when this model
+  // is reasoning-capable. Apply the bridge-wide default just as we do for auto
+  // and tiered models, but never leak a global effort into a non-reasoning route.
+  const effort = model.reasoning
+    ? normalizedEffort ?? model.effort ?? defaultEffort
+    : undefined;
   return {
     model: model.agyModelId ?? model.id,
     effort,
