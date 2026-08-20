@@ -31,8 +31,8 @@ if (prompt.includes("FAKE:CHILD")) {
   continueForever();
 }
 
-const correctedMissingRecipient = prompt.includes("no such Antigravity recipient exists")
-  || prompt.includes("Provider mode does not use Antigravity messaging for OMP actions");
+const correctedMissingRecipient = prompt.includes("Mandatory provider routing correction")
+  || prompt.includes("Provider mode has no internal messaging return path");
 const structured = {
   text: prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && correctedMissingRecipient
     ? "recovered without AGY messaging"
@@ -139,26 +139,34 @@ if (!plain) {
   );
 }
 
-console.log(
-  JSON.stringify({
-    event: "result",
-    result: {
-      conversation_id: "fake-conversation",
-      status: "SUCCESS",
-      response: responseText,
-      ...(plain ? {} : { structured_output: structured }),
-      duration_seconds: 0.1,
-      num_turns: 1,
-      usage: {
-        input_tokens: 10,
-        output_tokens: 4,
-        thinking_tokens: 0,
-        cache_read_tokens: 2,
-        total_tokens: 16,
-      },
-    },
-  }),
-);
+const terminal = {
+  conversation_id: "fake-conversation",
+  status: "SUCCESS",
+  response: responseText,
+  ...(plain ? {} : { structured_output: structured }),
+  duration_seconds: 0.1,
+  num_turns: 1,
+  usage: {
+    input_tokens: 10,
+    output_tokens: 4,
+    thinking_tokens: 0,
+    cache_read_tokens: 2,
+    total_tokens: 16,
+  },
+};
+console.log(JSON.stringify({ event: "result", result: terminal }));
+
+if (prompt.includes("FAKE:DUPLICATE_RESULT")) {
+  console.log(JSON.stringify({ event: "result", result: terminal }));
+}
+if (prompt.includes("FAKE:CONFLICTING_RESULT")) {
+  console.log(
+    JSON.stringify({
+      event: "result",
+      result: { ...terminal, response: "conflicting terminal", structured_output: { text: "conflict", tool_calls: [] } },
+    }),
+  );
+}
 
 function continueForever() {
   // Keeps the process alive until the bridge aborts or times out.

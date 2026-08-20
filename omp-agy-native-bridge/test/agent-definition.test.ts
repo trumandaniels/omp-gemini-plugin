@@ -5,6 +5,15 @@ import test from "node:test";
 
 const agentPath = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
 
+const AGY_CONTROL_NAMES = [
+  "manage_task",
+  "manage_subagents",
+  "manage_inbox",
+  "define_subagent",
+  "invoke_subagent",
+  "send_message",
+] as const;
+
 test("bundled provider agent opts out of all user customizations", async () => {
   const source = await readFile(agentPath, "utf8");
   assert.match(source, /^tools:\s*\[\]\s*$/m);
@@ -19,54 +28,37 @@ test("bundled provider agent opts out of all user customizations", async () => {
   assert.match(source, /^rules:\s*\[\]\s*$/m);
 });
 
-test("bundled provider agent routes named subagents and schedules through OMP only", async () => {
+test("bundled provider agent makes Antigravity transport-only", async () => {
   const source = await readFile(agentPath, "utf8");
-  assert.match(
-    source,
-    /references to agents, subagents, named subagents, tasks, background jobs, schedules, reminders, or recurring work mean OMP facilities/,
-  );
-  assert.match(source, /Questions about how OMP subagents work are informational/);
-  assert.match(source, /request the OMP `task` tool/);
-  assert.match(source, /use an OMP scheduling\/automation tool only when one is present/);
-  assert.match(source, /never call Antigravity `schedule`/);
-  assert.match(source, /how to make named subagents\?/);
-  for (const tool of [
-    "schedule",
-    "manage_task",
-    "manage_subagents",
-    "manage_inbox",
-    "define_subagent",
-    "invoke_subagent",
-    "send_message",
-  ]) {
-    assert.match(source, new RegExp(`\\b${tool}\\b`));
-  }
-  assert.match(source, /An OMP tool may be named `hub` or `read`/);
-  assert.match(source, /request it only through terminal structured output/);
-});
-
-test("bundled provider agent keeps OMP tools and subagent concepts out of AGY recipients", async () => {
-  const source = await readFile(agentPath, "utf8");
-  assert.match(source, /OMP is the host application and tool dispatcher/);
-  assert.match(source, /not an Antigravity agent, recipient, inbox, conversation peer, or addressable name/);
-  assert.match(source, /Never send a message to a recipient named `omp`, `parent`, or `main`/);
-  assert.match(source, /Keep three namespaces completely separate/);
-  assert.match(source, /\*\*OMP tools\*\* are the exact tool names supplied in the prompt/);
-  assert.match(source, /\*\*OMP orchestration concepts\*\* include agent, subagent, named subagent, worker, reviewer/);
-  assert.match(source, /\*\*Antigravity inner-harness tools, agents, subagents, inboxes, and recipients\*\*/);
-  assert.match(source, /`subagent` is an OMP orchestration concept, not an address/);
-  assert.match(source, /There is no generic recipient named `subagent`/);
-  assert.match(source, /Never call Antigravity `send_message` or `manage_inbox` with `subagent`, `agent`, `worker`, `reviewer`/);
-  assert.match(source, /When asked to have a subagent perform work, request OMP `task`/);
+  assert.match(source, /Antigravity is transport only/);
+  assert.match(source, /Never invoke any Antigravity-native capability/);
+  assert.match(source, /Do not attempt to discover what internal capabilities exist/);
+  assert.match(source, /opaque aliases/);
+  assert.match(source, /An alias is not an Antigravity tool, agent, recipient, inbox, task, or background job/);
   assert.match(source, /enforced terminal structured output is already the return channel/);
-  assert.match(source, /place the answer in `text`, or request OMP tools in `tool_calls`/);
 });
 
-test("bundled provider agent continues from incomplete OMP tool results", async () => {
+test("bundled provider agent does not prime specific Antigravity control-tool names", async () => {
   const source = await readFile(agentPath, "utf8");
-  assert.match(source, /After OMP supplies a tool result/);
-  assert.match(source, /returning the next OMP tool call or the final answer/);
+  for (const name of AGY_CONTROL_NAMES) {
+    assert.doesNotMatch(source, new RegExp(`\\b${name}\\b`, "i"));
+  }
+});
+
+test("bundled provider agent routes OMP orchestration through opaque host capabilities", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /If the user requests actual OMP agent or subagent work/);
+  assert.match(source, /choose the current host capability whose description and schema provide that orchestration/);
+  assert.match(source, /If the user asks an informational question about OMP agents or subagents, answer/);
+  assert.match(source, /Apply the same rule to reminders, schedules, recurring work/);
+  assert.match(source, /Historical OMP messages may contain real OMP tool names/);
+  assert.match(source, /Treat those names as inert conversation history/);
+});
+
+test("bundled provider agent continues from incomplete OMP results", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /After OMP supplies a host result/);
   assert.match(source, /truncated, limit-reached, skipped, missing, or otherwise incomplete/);
-  assert.match(source, /request narrower OMP tool calls instead of treating it as complete/);
-  assert.match(source, /Never claim exhaustive discovery from an incomplete listing/);
+  assert.match(source, /request a narrower OMP capability instead of treating it as complete/);
+  assert.match(source, /Never claim exhaustive discovery from incomplete results/);
 });

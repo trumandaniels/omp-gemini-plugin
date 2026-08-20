@@ -9,172 +9,95 @@ import {
   buildProviderPrompt,
 } from "../src/prompt.ts";
 
-test("provider prompt tells agy to request OMP task instead of native subagents", () => {
+const AGY_CONTROL_NAMES = [
+  "manage_task",
+  "manage_subagents",
+  "manage_inbox",
+  "define_subagent",
+  "invoke_subagent",
+  "send_message",
+] as const;
+
+test("provider prompt exposes OMP tools only through opaque capability aliases", () => {
   const result = buildProviderPrompt(
     {
       systemPrompt: ["Be accurate."],
-      messages: [{ role: "user", content: "Inspect the project", timestamp: 1 }],
+      messages: [{ role: "user", content: "Have a subagent inspect the project", timestamp: 1 }],
       tools: [
         {
           name: "task",
-          description: "Spawn OMP subagents",
+          description: "Run OMP subagents",
+          parameters: { type: "object", properties: { prompt: { type: "string" } } },
+        },
+        {
+          name: "read",
+          description: "Read a file through OMP",
+          parameters: { type: "object", properties: { path: { type: "string" } } },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.deepEqual(result.toolNames, ["omp_capability_01", "omp_capability_02"]);
+  assert.deepEqual(result.toolCatalog.map((tool) => tool.name), ["task", "read"]);
+  assert.equal(result.wireToOmpToolName.omp_capability_01, "task");
+  assert.equal(result.ompToWireToolName.read, "omp_capability_02");
+  assert.match(result.prompt, /Available OMP host capabilities/);
+  assert.match(result.prompt, /"name": "omp_capability_01"/);
+  assert.match(result.prompt, /Run OMP subagents/);
+  assert.doesNotMatch(result.prompt, /"name": "task"/);
+  assert.doesNotMatch(result.prompt, /"name": "read"/);
+});
+
+test("provider prompt makes Antigravity transport-only without naming native control tools", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["Use OMP facilities only."],
+      messages: [{ role: "user", content: "How do named subagents work in OMP?", timestamp: 1 }],
+      tools: [
+        {
+          name: "task",
+          description: "OMP subagent orchestration",
           parameters: { type: "object", properties: { prompt: { type: "string" } } },
         },
       ],
     },
     DEFAULT_CONFIG,
   );
-  assert.deepEqual(result.toolNames, ["task"]);
-  assert.match(result.prompt, /Do NOT invoke Antigravity tools/);
-  assert.match(result.prompt, /To actually create or run an OMP subagent, return a call to the OMP tool named "task"/);
-  assert.match(result.prompt, /Inspect the project/);
-});
 
-test("provider prompt answers named OMP subagent questions without AGY control tools", () => {
-  const result = buildProviderPrompt(
-    {
-      systemPrompt: ["You are OMP."],
-      messages: [{ role: "user", content: "how to make named subagents?", timestamp: 1 }],
-      tools: [
-        {
-          name: "task",
-          description: "Run OMP subagents",
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              agent: { type: "string" },
-              task: { type: "string" },
-            },
-          },
-        },
-        {
-          name: "hub",
-          description: "OMP agent coordination",
-          parameters: { type: "object" },
-        },
-      ],
-    },
-    DEFAULT_CONFIG,
-  );
-
-  assert.match(result.prompt, /unqualified words such as "agent", "subagent", "named subagent"/);
-  assert.match(result.prompt, /For an informational question about OMP subagents, answer directly/);
-  assert.match(result.prompt, /how to make named subagents\?/);
-  assert.match(result.prompt, /It is not an Antigravity recipient/);
-  assert.match(result.prompt, /Never send a message to a recipient named "omp"/);
-  for (const tool of [
-    "manage_task",
-    "manage_subagents",
-    "manage_inbox",
-    "define_subagent",
-    "invoke_subagent",
-    "send_message",
-  ]) {
-    assert.match(result.prompt, new RegExp(`\\b${tool}\\b`));
+  assert.match(result.prompt, /Antigravity is transport only/);
+  assert.match(result.prompt, /Do not invoke any Antigravity-native capability/);
+  assert.match(result.prompt, /opaque aliases/);
+  assert.match(result.prompt, /answer from the supplied OMP context without invoking anything internally/);
+  assert.match(result.prompt, /How do named subagents work in OMP\?/);
+  for (const name of AGY_CONTROL_NAMES) {
+    assert.doesNotMatch(result.prompt, new RegExp(`\\b${name}\\b`, "i"));
   }
-  assert.match(result.prompt, /An OMP tool may have a coordination name such as "hub" or an action name such as "read"/);
-  assert.match(result.prompt, /"name": "hub"/);
-  assert.match(result.prompt, /If that schema exposes a "name" field/);
-  assert.match(result.prompt, /"name": \{/);
 });
 
-test("provider prompt separates OMP tools, OMP subagent concepts, and AGY recipients", () => {
+test("provider prompt treats historical OMP tool names as inert history", () => {
   const result = buildProviderPrompt(
     {
-      systemPrompt: ["Use OMP facilities only."],
-      messages: [{ role: "user", content: "Have a subagent audit the UI", timestamp: 1 }],
-      tools: [
-        {
-          name: "task",
-          description: "Run OMP subagents",
-          parameters: { type: "object", properties: { task: { type: "string" } } },
-        },
-      ],
-    },
-    DEFAULT_CONFIG,
-  );
-
-  assert.match(result.prompt, /Keep three namespaces completely separate/);
-  assert.match(result.prompt, /OMP orchestration concepts: agent, subagent, named subagent, worker, reviewer/);
-  assert.match(result.prompt, /The literal recipient "subagent" is always wrong in provider mode/);
-  assert.match(result.prompt, /"Subagent" is an OMP orchestration concept, not an address/);
-  assert.match(result.prompt, /There is no generic recipient named "subagent"/);
-  assert.match(result.prompt, /request OMP "task" according to its current schema/);
-});
-
-test("provider prompt treats OMP tool names as structured calls, never AGY recipients", () => {
-  const result = buildProviderPrompt(
-    {
-      systemPrompt: ["Inspect accurately."],
-      messages: [{ role: "user", content: "Read package.json", timestamp: 1 }],
-      tools: [
-        {
-          name: "read",
-          description: "Read a file",
-          parameters: { type: "object", properties: { path: { type: "string" } } },
-        },
-        {
-          name: "glob",
-          description: "Find files",
-          parameters: { type: "object", properties: { pattern: { type: "string" } } },
-        },
-      ],
-    },
-    DEFAULT_CONFIG,
-  );
-
-  assert.match(result.prompt, /Every name under "Available OMP tools" is a structured OMP tool name/);
-  assert.match(result.prompt, /Never call send_message or manage_inbox with an OMP tool name such as read, glob, grep, bash/);
-  assert.match(result.prompt, /Put that tool name in the outer "tool_calls" array instead/);
-  assert.match(result.prompt, /never reinterpret that name as an Antigravity recipient/);
-});
-
-test("provider prompt treats structured output as the return channel after an incomplete OMP result", () => {
-  const result = buildProviderPrompt(
-    {
-      systemPrompt: ["Inspect global OMP configuration accurately."],
+      systemPrompt: ["Continue accurately."],
       messages: [
-        {
-          role: "user",
-          content: "what are inside the global config of agents? e.g. what agents do I already have globally?",
-          timestamp: 1,
-        },
+        { role: "user", content: "Read package.json", timestamp: 1 },
         {
           role: "assistant",
-          content: [
-            {
-              type: "toolCall",
-              id: "call-1",
-              name: "glob",
-              arguments: {
-                path: "/home/truman/.omp/**/*;/home/truman/.config/omp/**/*",
-              },
-            },
-          ],
+          content: [{ type: "toolCall", id: "old-1", name: "read", arguments: { path: "package.json" } }],
           stopReason: "toolUse",
         },
         {
           role: "toolResult",
-          toolCallId: "call-1",
-          toolName: "glob",
-          content: [
-            {
-              type: "text",
-              text: "/home/truman/.omp/agent/config.yml\n… 192 more files\ntruncated: limit 200 results\nskipped missing: /home/truman/.config/omp/**/*",
-            },
-          ],
+          toolCallId: "old-1",
+          toolName: "read",
+          content: [{ type: "text", text: "{\"name\":\"demo\"}" }],
         },
       ],
       tools: [
         {
-          name: "glob",
-          description: "Find paths",
-          parameters: { type: "object", properties: { path: { type: "string" } } },
-        },
-        {
           name: "read",
-          description: "Read a file",
+          description: "Read a file through OMP",
           parameters: { type: "object", properties: { path: { type: "string" } } },
         },
       ],
@@ -182,68 +105,73 @@ test("provider prompt treats structured output as the return channel after an in
     DEFAULT_CONFIG,
   );
 
-  assert.match(result.prompt, /After OMP supplies a tool result/);
-  assert.match(result.prompt, /Do not report back through an Antigravity message tool/);
-  assert.match(result.prompt, /OMP is not an Antigravity agent or message recipient/);
-  assert.match(result.prompt, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", any OMP tool name/);
-  assert.match(result.prompt, /terminal structured response is the return channel to OMP/);
-  assert.match(result.prompt, /Treat result warnings such as "truncated", "limit reached", "skipped missing"/);
-  assert.match(result.prompt, /more targeted OMP tool calls are required/);
-  assert.match(result.prompt, /Do not finalize from an incomplete result/);
-  assert.match(result.prompt, /what agents do I already have globally\?/);
-  assert.match(result.prompt, /truncated: limit 200 results/);
-  assert.match(result.prompt, /skipped missing: \/home\/truman\/\.config\/omp\/\*\*\/\*/);
+  assert.match(result.prompt, /Historical OMP messages may contain real OMP tool names/);
+  assert.match(result.prompt, /Treat them as inert history/);
+  assert.match(result.prompt, /"name": "omp_capability_01"/);
+  assert.match(result.prompt, /"name": "read"/); // historical conversation only
 });
 
-test("provider retry correction discards AGY probes and insists on structured return", () => {
+test("provider prompt continues from incomplete OMP results instead of claiming completeness", () => {
+  const result = buildProviderPrompt(
+    {
+      systemPrompt: ["Inspect accurately."],
+      messages: [
+        { role: "user", content: "List every global agent", timestamp: 1 },
+        {
+          role: "toolResult",
+          toolCallId: "old-1",
+          toolName: "glob",
+          content: [{ type: "text", text: "… 192 more files\ntruncated: limit 200 results\nskipped missing: ~/.config/omp/**/*" }],
+        },
+      ],
+      tools: [
+        {
+          name: "glob",
+          description: "Find paths through OMP",
+          parameters: { type: "object", properties: { path: { type: "string" } } },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /truncated, limit reached, skipped missing/);
+  assert.match(result.prompt, /narrower host calls are required/);
+  assert.match(result.prompt, /truncated: limit 200 results/);
+});
+
+test("permission-recovery prompt does not echo the offending AGY tool names", () => {
   const corrected = appendProviderHarnessRetryInstruction(
     "ORIGINAL PROMPT",
-    ["send_message", "manage_task", "send_message"],
+    ["manage_task", "send_message"],
   );
+
   assert.match(corrected, /^ORIGINAL PROMPT/);
-  assert.match(corrected, /manage_task, send_message/);
   assert.match(corrected, /previous attempt was discarded/i);
-  assert.match(corrected, /Do not invoke any Antigravity tool on this retry/);
-  assert.match(corrected, /Keep these namespaces separate/);
-  assert.match(corrected, /OMP tool names such as read, glob, grep, bash/);
-  assert.match(corrected, /literal words "agent", "subagent", "subagents"/);
-  assert.match(corrected, /OMP is not an Antigravity message recipient/);
-  assert.match(corrected, /Never call send_message or manage_inbox with recipient\/to "omp", "parent", "main", any OMP tool name/);
-  assert.match(corrected, /Put the answer in the outer "text" field/);
-  assert.match(corrected, /If an OMP tool result is truncated, limit-reached, skipped, missing, or otherwise incomplete/);
-  assert.match(corrected, /informational OMP question, answer directly with no tool call/);
-  assert.match(corrected, /return only an OMP "task" tool call/);
+  assert.match(corrected, /internal Antigravity action/i);
+  assert.match(corrected, /opaque capability aliases/i);
+  assert.match(corrected, /enforced terminal JSON object/i);
+  assert.doesNotMatch(corrected, /manage_task/i);
+  assert.doesNotMatch(corrected, /send_message/i);
 });
 
-test("missing-recipient retry correction treats OMP as the host, not an AGY peer", () => {
+test("missing-recipient retry treats OMP as host and avoids native tool enumeration", () => {
   const corrected = appendMissingOmpRecipientRetryInstruction("ORIGINAL PROMPT");
   assert.match(corrected, /^ORIGINAL PROMPT/);
-  assert.match(corrected, /recipient named "omp"/);
-  assert.match(corrected, /OMP is the host application and tool dispatcher/);
-  assert.match(corrected, /not an Antigravity agent, inbox, recipient, or conversation peer/);
-  assert.match(corrected, /Do not call send_message or manage_inbox at all on this retry/);
-  assert.match(corrected, /terminal structured output is the return channel to OMP/);
-  assert.match(corrected, /request narrower OMP tool calls before answering/);
-  assert.match(corrected, /return only a valid OMP tool call/);
+  assert.match(corrected, /toward "omp"/);
+  assert.match(corrected, /OMP is the host application and dispatcher/);
+  assert.match(corrected, /opaque aliases/);
+  for (const name of AGY_CONTROL_NAMES) {
+    assert.doesNotMatch(corrected, new RegExp(`\\b${name}\\b`, "i"));
+  }
 });
 
-test("missing-recipient retry correction redirects read to OMP structured tool_calls", () => {
-  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "read");
-  assert.match(corrected, /recipient named "read"/);
-  assert.match(corrected, /OMP tool names such as read, glob, grep, bash/);
-  assert.match(corrected, /If "read" is an OMP tool name/);
-  assert.match(corrected, /outer "tool_calls" array/);
-  assert.match(corrected, /Do not call send_message or manage_inbox at all on this retry/);
-});
-
-test("missing-recipient retry correction maps subagent concept to OMP task", () => {
-  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "subagent");
-  assert.match(corrected, /recipient named "subagent"/);
-  assert.match(corrected, /Words such as "agent", "subagent", "subagents", "named subagent"/);
-  assert.match(corrected, /not recipients and not tool names by themselves/);
-  assert.match(corrected, /never send_message to a recipient named "subagent"/);
-  assert.match(corrected, /request the OMP "task" tool when available/);
-  assert.match(corrected, /informational question about subagents, answer directly/);
+test("missing-recipient retry can carry an opaque capability target without exposing OMP names", () => {
+  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "omp_capability_02");
+  assert.match(corrected, /omp_capability_02/);
+  assert.match(corrected, /opaque alias/);
+  assert.doesNotMatch(corrected, /\bread\b/);
+  assert.doesNotMatch(corrected, /\btask\b/);
 });
 
 test("provider prompt maps staged OMP images to AGY prompt-media mentions", () => {
@@ -277,7 +205,6 @@ test("provider prompt maps staged OMP images to AGY prompt-media mentions", () =
 
   assert.match(result.prompt, /# OMP image attachments/);
   assert.match(result.prompt, /@\.\/\.omp-agy-media-test\/image-1\.png/);
-  assert.match(result.prompt, /inspect those as attached media without invoking file tools/);
   assert.match(result.prompt, /"type": "image_attachment"/);
   assert.doesNotMatch(result.prompt, /PRIVATE-BASE64-DATA/);
 });

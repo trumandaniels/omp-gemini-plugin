@@ -7,21 +7,20 @@ import {
   parseBridgeStructuredOutput,
 } from "../src/schema.ts";
 
-test("finish_reason is compatibility metadata, not a required schema field", () => {
+test("finish_reason and empty envelope fields are compatibility metadata", () => {
   const schema = buildBridgeOutputSchema(["read"]) as {
     required?: string[];
     properties?: Record<string, unknown>;
   };
 
-  assert.deepEqual(schema.required, ["text", "tool_calls"]);
+  assert.equal(schema.required, undefined);
   assert.ok(schema.properties?.finish_reason);
 });
 
-test("parser derives tool_use when finish_reason is missing", () => {
+test("parser derives tool_use when finish_reason and text are missing", () => {
   assert.deepEqual(
     parseBridgeStructuredOutput(
       {
-        text: "",
         tool_calls: [{ name: "read", arguments: { path: "README.md" } }],
       },
       ["read"],
@@ -32,6 +31,19 @@ test("parser derives tool_use when finish_reason is missing", () => {
       finish_reason: "tool_use",
     },
   );
+});
+
+test("parser derives stop when tool_calls is omitted or null", () => {
+  assert.deepEqual(parseBridgeStructuredOutput({ text: "done" }, ["read"]), {
+    text: "done",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+  assert.deepEqual(parseBridgeStructuredOutput({ text: "done", tool_calls: null }, ["read"]), {
+    text: "done",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
 });
 
 test("parser ignores conflicting or future finish_reason values", () => {

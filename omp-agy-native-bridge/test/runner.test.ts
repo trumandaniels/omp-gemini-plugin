@@ -9,14 +9,11 @@ const fakeAgy = fileURLToPath(new URL("./fixtures/fake-agy", import.meta.url));
 
 await chmod(fakeAgy, 0o755);
 
-test("runAgy parses official stream-json shape", async () => {
-  const result = await runAgy({
-    prompt: "hello",
+function baseRunOptions(prompt: string) {
+  return {
+    prompt,
     cwd: process.cwd(),
     binary: fakeAgy,
-    model: "fake-model",
-    effort: "high",
-    agent: "omp-bridge-model",
     printTimeout: "1m",
     hardTimeoutMs: 10_000,
     sandbox: true,
@@ -24,6 +21,15 @@ test("runAgy parses official stream-json shape", async () => {
     maxStderrBytes: 10_000,
     killGraceMs: 100,
     sanitizeAccountEnvironment: true,
+  } as const;
+}
+
+test("runAgy parses official stream-json shape", async () => {
+  const result = await runAgy({
+    ...baseRunOptions("hello"),
+    model: "fake-model",
+    effort: "high",
+    agent: "omp-bridge-model",
     schema: { type: "object" },
   });
   assert.equal(result.terminal.status, "SUCCESS");
@@ -38,35 +44,30 @@ test("runAgy parses official stream-json shape", async () => {
   assert.equal(result.eventCount, 3);
 });
 
+test("runAgy tolerates an exact duplicate terminal result", async () => {
+  const result = await runAgy(baseRunOptions("FAKE:DUPLICATE_RESULT"));
+  assert.equal(result.terminal.status, "SUCCESS");
+  assert.equal(result.terminal.response, JSON.stringify({ text: "ok", tool_calls: [], finish_reason: "stop" }));
+  assert.equal(result.eventCount, 4);
+});
+
+test("runAgy rejects conflicting duplicate terminal results", async () => {
+  await assert.rejects(
+    runAgy(baseRunOptions("FAKE:CONFLICTING_RESULT")),
+    /conflicting terminal result events/,
+  );
+});
+
 test("runAgy transports prompts larger than the host argv budget through stdin", async () => {
   const result = await runAgy({
-    prompt: `large-context\n${"x".repeat(300_000)}`,
-    cwd: process.cwd(),
-    binary: fakeAgy,
-    printTimeout: "1m",
-    hardTimeoutMs: 10_000,
-    sandbox: true,
+    ...baseRunOptions(`large-context\n${"x".repeat(300_000)}`),
     maxPromptBytes: 400_000,
-    maxStderrBytes: 10_000,
-    killGraceMs: 100,
-    sanitizeAccountEnvironment: true,
   });
   assert.equal(result.terminal.status, "SUCCESS");
 });
 
 test("runAgy accepts successful plain-text responses without structured_output", async () => {
-  const result = await runAgy({
-    prompt: "FAKE:PLAIN",
-    cwd: process.cwd(),
-    binary: fakeAgy,
-    printTimeout: "1m",
-    hardTimeoutMs: 10_000,
-    sandbox: true,
-    maxPromptBytes: 100_000,
-    maxStderrBytes: 10_000,
-    killGraceMs: 100,
-    sanitizeAccountEnvironment: true,
-  });
+  const result = await runAgy(baseRunOptions("FAKE:PLAIN"));
   assert.equal(result.terminal.status, "SUCCESS");
   assert.equal(result.terminal.response, "plain provider response");
   assert.equal(result.terminal.structured_output, undefined);
@@ -76,34 +77,15 @@ test("runAgy accepts successful plain-text responses without structured_output",
 test("runAgy refuses prompts above the configured bridge byte limit", async () => {
   await assert.rejects(
     runAgy({
-      prompt: "x".repeat(101),
-      cwd: process.cwd(),
-      binary: fakeAgy,
-      printTimeout: "1m",
-      hardTimeoutMs: 10_000,
-      sandbox: true,
+      ...baseRunOptions("x".repeat(101)),
       maxPromptBytes: 100,
-      maxStderrBytes: 10_000,
-      killGraceMs: 100,
-      sanitizeAccountEnvironment: true,
     }),
     /above AGY_BRIDGE_MAX_PROMPT_BYTES/,
   );
 });
 
 test("runAgy captures nested Antigravity tool and subagent metadata", async () => {
-  const result = await runAgy({
-    prompt: "FAKE:TOOL",
-    cwd: process.cwd(),
-    binary: fakeAgy,
-    printTimeout: "1m",
-    hardTimeoutMs: 10_000,
-    sandbox: true,
-    maxPromptBytes: 100_000,
-    maxStderrBytes: 10_000,
-    killGraceMs: 100,
-    sanitizeAccountEnvironment: true,
-  });
+  const result = await runAgy(baseRunOptions("FAKE:TOOL"));
   assert.equal(result.toolSteps.length, 1);
   assert.equal(result.toolStepCount, 1);
   assert.equal(result.subagents.length, 1);
@@ -114,16 +96,7 @@ test("runAgy captures nested Antigravity tool and subagent metadata", async () =
 test("runAgy terminates the child when an event callback fails", async () => {
   await assert.rejects(
     runAgy({
-      prompt: "hello",
-      cwd: process.cwd(),
-      binary: fakeAgy,
-      printTimeout: "1m",
-      hardTimeoutMs: 10_000,
-      sandbox: true,
-      maxPromptBytes: 100_000,
-      maxStderrBytes: 10_000,
-      killGraceMs: 100,
-      sanitizeAccountEnvironment: true,
+      ...baseRunOptions("hello"),
       onEvent: () => {
         throw new Error("renderer disconnected");
       },
@@ -134,18 +107,7 @@ test("runAgy terminates the child when an event callback fails", async () => {
 
 test("runAgy rejects non-success terminal status", async () => {
   await assert.rejects(
-    runAgy({
-      prompt: "FAKE:ERROR",
-      cwd: process.cwd(),
-      binary: fakeAgy,
-      printTimeout: "1m",
-      hardTimeoutMs: 10_000,
-      sandbox: true,
-      maxPromptBytes: 100_000,
-      maxStderrBytes: 10_000,
-      killGraceMs: 100,
-      sanitizeAccountEnvironment: true,
-    }),
+    runAgy(baseRunOptions("FAKE:ERROR")),
     /agy failed: fake failure/,
   );
 });
@@ -153,17 +115,8 @@ test("runAgy rejects non-success terminal status", async () => {
 test("runAgy preserves terminal and complete activity counts on a failed provider turn", async () => {
   await assert.rejects(
     runAgy({
-      prompt: "FAKE:MISSING_OMP_RECIPIENT",
-      cwd: process.cwd(),
-      binary: fakeAgy,
+      ...baseRunOptions("FAKE:MISSING_OMP_RECIPIENT"),
       agent: "omp-bridge-model",
-      printTimeout: "1m",
-      hardTimeoutMs: 10_000,
-      sandbox: true,
-      maxPromptBytes: 100_000,
-      maxStderrBytes: 10_000,
-      killGraceMs: 100,
-      sanitizeAccountEnvironment: true,
       schema: { type: "object" },
     }),
     (error: unknown) => {

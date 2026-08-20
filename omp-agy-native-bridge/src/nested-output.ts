@@ -3,9 +3,18 @@ import type { BridgeStructuredOutput } from "./types.ts";
 
 const MAX_NESTED_BRIDGE_DEPTH = 4;
 
+/**
+ * Nested-output recovery is intentionally more conservative than the top-level
+ * structured-output parser. Plain JSON is valid user-visible content, so only
+ * unwrap text that actually carries bridge protocol keys. This preserves exact
+ * JSON answers instead of reformatting arbitrary objects while still recovering
+ * the known serialized tool/finish envelopes emitted by AGY wrappers.
+ */
 function looksLikeSerializedBridgeOutput(value: string): boolean {
   const trimmed = value.trimStart();
-  return trimmed.startsWith("{") || /^(?:```|~~~)(?:json)?(?:\s|$)/i.test(trimmed);
+  const startsLikeJson = trimmed.startsWith("{") || /^(?:```|~~~)(?:json)?(?:\s|$)/i.test(trimmed);
+  if (!startsLikeJson) return false;
+  return /"(?:tool_calls|finish_reason)"\s*:/.test(trimmed);
 }
 
 function sameBridgeOutput(left: BridgeStructuredOutput, right: BridgeStructuredOutput): boolean {

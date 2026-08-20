@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { DEFAULT_CONFIG, validateBridgeConfig } from "../src/config.ts";
 
+test("default prompt budget is platform-independent after stdin transport", () => {
+  assert.equal(DEFAULT_CONFIG.maxPromptBytes, 1_500_000);
+});
+
 test("bridge config accepts capabilities.image on a model", () => {
   assert.doesNotThrow(() =>
     validateBridgeConfig({
@@ -58,6 +62,28 @@ test("bridge config validates booleans and default effort from JSON-shaped value
   assert.throws(
     () => validateBridgeConfig({ ...DEFAULT_CONFIG, defaultEffort: "max" as unknown as "high" }),
     /defaultEffort must be low, medium, high/,
+  );
+});
+
+test("bridge config rejects effort metadata on non-reasoning models", () => {
+  const baseModel = {
+    id: "plain-model",
+    name: "Plain model",
+    reasoning: false,
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+  };
+  assert.throws(
+    () => validateBridgeConfig({ ...DEFAULT_CONFIG, models: [{ ...baseModel, effort: "low" }] }),
+    /cannot define effort when reasoning=false/,
+  );
+  assert.throws(
+    () =>
+      validateBridgeConfig({
+        ...DEFAULT_CONFIG,
+        models: [{ ...baseModel, agyModelIdsByEffort: { low: "plain-low" } }],
+      }),
+    /cannot define agyModelIdsByEffort when reasoning=false/,
   );
 });
 

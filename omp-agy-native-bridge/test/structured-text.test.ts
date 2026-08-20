@@ -153,13 +153,13 @@ test("nested bridge objects cannot smuggle unavailable OMP tools", () => {
   );
 });
 
-test("non-text scalar values remain invalid", () => {
-  assert.throws(
-    () =>
-      parseBridgeStructuredOutput(
-        { text: 42, tool_calls: [], finish_reason: "stop" },
-        [],
-      ),
-    /must be a string or JSON text container; got number/,
+test("scalar JSON text is rendered instead of crashing", () => {
+  assert.equal(
+    parseBridgeStructuredOutput({ text: 42, tool_calls: [], finish_reason: "stop" }, []).text,
+    "42",
+  );
+  assert.equal(
+    parseBridgeStructuredOutput({ text: true, tool_calls: [], finish_reason: "stop" }, []).text,
+    "true",
   );
 });

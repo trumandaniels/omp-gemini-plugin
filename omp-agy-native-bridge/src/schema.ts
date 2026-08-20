@@ -1,3 +1,5 @@
+import { toolWireSchema as ompToolWireSchema } from "@oh-my-pi/pi-ai/utils/schema/wire";
+
 import type { BridgeStructuredOutput } from "./types.ts";
 
 export interface ToolLike {
@@ -14,6 +16,7 @@ export interface SerializedTool {
 
 const MAX_NESTED_OBJECT_OUTPUT_DEPTH = 4;
 const MAX_STRUCTURED_TEXT_DEPTH = 16;
+const TEXT_BLOCK_TYPES = new Set(["text", "input_text", "output_text"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -22,15 +25,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Detect a bridge-shaped object from semantic fields only.
  *
- * `finish_reason` is deliberately excluded: it is redundant transport metadata
- * and AGY versions/models have emitted it with different spellings, casing, or
- * not at all. The bridge derives the canonical completion reason from validated
- * tool calls instead.
+ * `finish_reason` is deliberately excluded: it is redundant transport metadata.
+ * `text` and `tool_calls` are optional at the compatibility boundary because
+ * empty text is normal for tool turns and an omitted/nullable tool list means
+ * "no tool calls". The parser still rejects an output with no semantic content.
+ * Content-block objects are explicitly excluded so arrays of `{type:"text"}`
+ * blocks are flattened as text rather than mistaken for nested bridge envelopes.
  */
 function isBridgeEnvelope(value: unknown): value is Record<string, unknown> {
-  return isRecord(value)
-    && Object.prototype.hasOwnProperty.call(value, "text")
-    && Array.isArray(value.tool_calls);
+  if (!isRecord(value)) return false;
+  const hasText = Object.prototype.hasOwnProperty.call(value, "text");
+  const hasToolCalls = Object.prototype.hasOwnProperty.call(value, "tool_calls");
+  if (!hasText && !hasToolCalls) return false;
+  if (!hasToolCalls && typeof value.type === "string" && TEXT_BLOCK_TYPES.has(value.type)) return false;
+  return value.tool_calls === undefined || value.tool_calls === null || Array.isArray(value.tool_calls);
 }
 
 function firstBridgeEnvelope(value: unknown): Record<string, unknown> | undefined {
@@ -39,16 +47,22 @@ function firstBridgeEnvelope(value: unknown): Record<string, unknown> | undefine
   return value.find(isBridgeEnvelope);
 }
 
+function toolCallsOrEmpty(value: unknown): unknown[] | undefined {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : undefined;
+}
+
 function nestedBridgeEnvelope(value: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (!Array.isArray(value.tool_calls) || value.tool_calls.length > 0) {
-    return undefined;
-  }
+  const calls = toolCallsOrEmpty(value.tool_calls);
+  if (!calls || calls.length > 0) return undefined;
   return firstBridgeEnvelope(value.text);
 }
 
 function structuredTextFromContainer(value: unknown, depth = 0): string | undefined {
   if (depth > MAX_STRUCTURED_TEXT_DEPTH) return undefined;
   if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value === "boolean") return String(value);
   if (value === null || value === undefined) return "";
 
   if (Array.isArray(value)) {
@@ -104,7 +118,7 @@ function normalizeBridgeText(value: unknown): string {
   }
 
   throw new Error(
-    `agy structured_output.text must be a string or JSON text container; got ${describeStructuredTextType(value)}`,
+    `agy structured_output.text must be text-compatible JSON; got ${describeStructuredTextType(value)}`,
   );
 }
 
@@ -183,21 +197,7 @@ function parseSerializedBridgeOutput(
   }
 }
 
-export function parseAgyTerminalOutput(
-  terminal: { structured_output?: unknown; response?: string },
-  allowedToolNames: readonly string[],
-): BridgeStructuredOutput {
-  if (terminal.structured_output !== undefined && terminal.structured_output !== null) {
-    return typeof terminal.structured_output === "string"
-      ? parseSerializedBridgeOutput(terminal.structured_output, allowedToolNames)
-      : parseBridgeStructuredOutput(terminal.structured_output, allowedToolNames);
-  }
-
-  const response = terminal.response;
-  if (typeof response !== "string" || response.trim() === "") {
-    throw new Error("agy returned neither structured_output nor non-empty response text");
-  }
-
+function parseResponseOrPlainText(response: string, allowedToolNames: readonly string[]): BridgeStructuredOutput {
   try {
     return parseSerializedBridgeOutput(response, allowedToolNames);
   } catch (error) {
@@ -208,6 +208,40 @@ export function parseAgyTerminalOutput(
       finish_reason: "stop",
     };
   }
+}
+
+export function parseAgyTerminalOutput(
+  terminal: { structured_output?: unknown; response?: string },
+  allowedToolNames: readonly string[],
+): BridgeStructuredOutput {
+  if (terminal.structured_output !== undefined && terminal.structured_output !== null) {
+    try {
+      return typeof terminal.structured_output === "string"
+        ? parseSerializedBridgeOutput(terminal.structured_output, allowedToolNames)
+        : parseBridgeStructuredOutput(terminal.structured_output, allowedToolNames);
+    } catch (error) {
+      // A syntactically malformed serialized structured_output has no trustworthy
+      // executable semantics. If AGY also supplied its normal response channel,
+      // recover from that channel instead. Semantic validation failures (for
+      // example an unavailable tool name) are deliberately NOT swallowed.
+      const response = terminal.response;
+      if (
+        typeof terminal.structured_output === "string"
+        && error instanceof SyntaxError
+        && typeof response === "string"
+        && response.trim() !== ""
+      ) {
+        return parseResponseOrPlainText(response, allowedToolNames);
+      }
+      throw error;
+    }
+  }
+
+  const response = terminal.response;
+  if (typeof response !== "string" || response.trim() === "") {
+    throw new Error("agy returned neither structured_output nor non-empty response text");
+  }
+  return parseResponseOrPlainText(response, allowedToolNames);
 }
 
 const FORBIDDEN_JSON_KEYS = new Set(["__proto__", "prototype", "constructor"]);
@@ -229,6 +263,36 @@ function sanitizeJsonValue(value: unknown, path: string, depth = 0): unknown {
     result[key] = sanitizeJsonValue(child, `${path}.${key}`, depth + 1);
   }
   return result;
+}
+
+function normalizeToolArguments(value: unknown, index: number): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  let candidate = value;
+  if (typeof candidate === "string") {
+    const trimmed = candidate.trim();
+    if (trimmed === "") return {};
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch {
+      throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+    }
+  }
+  if (!isRecord(candidate)) {
+    throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+  }
+  return sanitizeJsonValue(candidate, `tool_calls[${index}].arguments`) as Record<string, unknown>;
+}
+
+function normalizeToolCallId(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  // Tool-call ids are correlation metadata, not model intent. Invalid ids are
+  // omitted so provider.ts can synthesize a fresh UUID instead of failing an
+  // otherwise valid tool request.
+  return undefined;
 }
 
 function jsonClone(value: unknown): unknown {
@@ -279,6 +343,18 @@ export function parameterSchema(parameters: unknown): Record<string, unknown> {
   return { type: "object", additionalProperties: true };
 }
 
+function hostToolParameterSchema(tool: ToolLike): Record<string, unknown> | undefined {
+  try {
+    const convert = ompToolWireSchema as unknown as (tool: ToolLike) => Record<string, unknown>;
+    const cloned = jsonClone(convert(tool));
+    return isRecord(cloned) ? cloned : undefined;
+  } catch {
+    // Host schema conversion is an optimization, not a loading invariant. Keep a
+    // local compatibility converter as the fail-safe for older or changed OMPs.
+    return undefined;
+  }
+}
+
 export function truncateText(value: string, maxChars: number): string {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, Math.max(0, maxChars - 80))}\n…[truncated by omp-agy bridge]`;
@@ -309,7 +385,7 @@ export function serializeTools(
     .map(({ tool }) => tool);
   for (const tool of ordered) {
     const description = truncateText(tool.description ?? "", limits.maxDescriptionChars);
-    let schema = parameterSchema(tool.parameters);
+    let schema = hostToolParameterSchema(tool) ?? parameterSchema(tool.parameters);
     let schemaJson = JSON.stringify(schema);
     if (schemaJson.length > limits.maxSchemaChars) {
       schema = {
@@ -336,30 +412,51 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
   const uniqueNames = [...new Set(toolNames)].sort();
   const toolCallItems: Record<string, unknown> = {
     type: "object",
-    additionalProperties: false,
+    additionalProperties: true,
     properties: {
-      id: { type: "string" },
+      // `id` and `arguments` are intentionally permissive at the AGY schema
+      // boundary. The bridge normalizes correlation ids and fully validates /
+      // sanitizes arguments before OMP sees a call. Keeping the outer schema
+      // looser prevents recoverable model-wrapper representation drift from
+      // becoming an upstream structured-output failure.
+      id: {},
       name: uniqueNames.length > 0 ? { type: "string", enum: uniqueNames } : { type: "string" },
-      arguments: { type: "object" },
+      arguments: {},
     },
-    required: ["name", "arguments"],
+    required: ["name"],
   };
 
   return {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     type: "object",
-    additionalProperties: false,
+    additionalProperties: true,
     properties: {
-      text: { type: "string" },
+      // Parser support is intentionally wider than plain string: AGY/model
+      // wrappers have returned null, content-block arrays, Gemini-style parts,
+      // scalar JSON, and JSON answer objects here. None controls execution.
+      text: {},
       tool_calls: uniqueNames.length > 0
-        ? { type: "array", items: toolCallItems, maxItems: 32 }
-        : { type: "array", maxItems: 0 },
+        ? { type: ["array", "null"], items: toolCallItems, maxItems: 32 }
+        : { type: ["array", "null"], maxItems: 0 },
       // Compatibility-only input. Different AGY releases/model wrappers have
       // produced different spellings/shapes here. The bridge never trusts it;
-      // canonical completion state is derived from the validated tool_calls.
+      // canonical completion state is derived from the validated tool calls.
       finish_reason: {},
     },
-    required: ["text", "tool_calls"],
+    // Presence is a semantic question handled after normalization: text-only
+    // answers may omit tool_calls, and tool-only turns may omit text.
+  };
+}
+
+function plainJsonAnswer(value: unknown): BridgeStructuredOutput {
+  const text = normalizeBridgeText(value);
+  if (text.length === 0) {
+    throw new Error("agy structured_output must contain text or at least one tool call");
+  }
+  return {
+    text,
+    tool_calls: [],
+    finish_reason: "stop",
   };
 }
 
@@ -375,38 +472,45 @@ function parseBridgeStructuredOutputInternal(
   if (Array.isArray(value)) {
     const first = firstBridgeEnvelope(value);
     if (first) return parseBridgeStructuredOutputInternal(first, allowedToolNames, depth + 1);
+    return plainJsonAnswer(value);
   }
 
-  if (!isRecord(value)) throw new Error("agy structured_output must be an object");
+  if (!isRecord(value)) {
+    if (value === null || value === undefined) throw new Error("agy structured_output must contain output data");
+    return plainJsonAnswer(value);
+  }
+
+  // A JSON answer object that is not bridge-shaped is harmless user-visible
+  // content, not a provider protocol failure. Never infer tool execution from it.
+  if (!isBridgeEnvelope(value)) return plainJsonAnswer(value);
 
   const nested = nestedBridgeEnvelope(value);
   if (nested) return parseBridgeStructuredOutputInternal(nested, allowedToolNames, depth + 1);
 
-  if (!Array.isArray(value.tool_calls)) throw new Error("agy structured_output.tool_calls must be an array");
+  const rawCalls = toolCallsOrEmpty(value.tool_calls);
+  if (!rawCalls) throw new Error("agy structured_output.tool_calls must be an array or null when supplied");
   const text = normalizeBridgeText(value.text);
-  if (value.tool_calls.length > 32) throw new Error("agy requested more than 32 tools in one turn");
+  if (rawCalls.length > 32) throw new Error("agy requested more than 32 tools in one turn");
 
   const allowed = new Set(allowedToolNames);
   const callIds = new Set<string>();
-  const calls = value.tool_calls.map((item, index) => {
+  const calls = rawCalls.map((item, index) => {
     if (!isRecord(item)) throw new Error(`tool_calls[${index}] must be an object`);
     if (typeof item.name !== "string" || !allowed.has(item.name)) {
       throw new Error(`tool_calls[${index}] named unavailable OMP tool: ${String(item.name)}`);
     }
-    if (!isRecord(item.arguments)) {
-      throw new Error(`tool_calls[${index}].arguments must be an object`);
+
+    const argumentsValue = normalizeToolArguments(item.arguments, index);
+    const id = normalizeToolCallId(item.id);
+    if (id !== undefined) {
+      if (callIds.has(id)) throw new Error(`Duplicate tool call id: ${id}`);
+      callIds.add(id);
     }
-    if (item.id !== undefined && (typeof item.id !== "string" || item.id.trim() === "")) {
-      throw new Error(`tool_calls[${index}].id must be a non-empty string when supplied`);
-    }
-    if (typeof item.id === "string") {
-      if (callIds.has(item.id)) throw new Error(`Duplicate tool call id: ${item.id}`);
-      callIds.add(item.id);
-    }
+
     return {
-      ...(typeof item.id === "string" ? { id: item.id } : {}),
+      ...(id === undefined ? {} : { id }),
       name: item.name,
-      arguments: sanitizeJsonValue(item.arguments, `tool_calls[${index}].arguments`) as Record<string, unknown>,
+      arguments: argumentsValue,
     };
   });
 

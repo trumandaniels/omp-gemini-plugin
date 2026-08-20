@@ -115,6 +115,21 @@ test("auto forwards undefined effort when no effort is selected", () => {
   assert.equal(selected.effort, undefined);
 });
 
+test("non-reasoning auto never inherits a global effort", () => {
+  const selected = resolveAgyModelSelection(
+    {
+      id: "auto",
+      name: "Auto without reasoning",
+      reasoning: false,
+      contextWindow: 100,
+      maxTokens: 100,
+    },
+    { reasoning: "high" },
+    "medium",
+  );
+  assert.deepEqual(selected, { model: undefined, effort: undefined });
+});
+
 test("tiered models never return both model slug and effort", () => {
   const selected = resolveAgyModelSelection(tieredModel(), { reasoning: "low" }, "low");
   assert.equal(selected.model, "gemini-3.7-flash-low");
@@ -159,4 +174,36 @@ test("direct non-tiered model uses configured slug", () => {
     { reasoning: "high" },
   );
   assert.deepEqual(selected, { model: "other-model", effort: "high" });
+});
+
+test("direct non-tiered model honors bridge defaultEffort", () => {
+  const selected = resolveAgyModelSelection(
+    {
+      id: "non-tier",
+      name: "Direct",
+      reasoning: true,
+      contextWindow: 100,
+      maxTokens: 100,
+      agyModelId: "other-model",
+    },
+    {},
+    "medium",
+  );
+  assert.deepEqual(selected, { model: "other-model", effort: "medium" });
+});
+
+test("direct non-reasoning model never receives an effort flag", () => {
+  const selected = resolveAgyModelSelection(
+    {
+      id: "non-reasoning",
+      name: "Direct no reasoning",
+      reasoning: false,
+      contextWindow: 100,
+      maxTokens: 100,
+      agyModelId: "other-model",
+    },
+    { reasoning: "high" },
+    "medium",
+  );
+  assert.deepEqual(selected, { model: "other-model", effort: undefined });
 });
