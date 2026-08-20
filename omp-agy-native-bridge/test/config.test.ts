@@ -3,6 +3,10 @@ import test from "node:test";
 
 import { DEFAULT_CONFIG, validateBridgeConfig } from "../src/config.ts";
 
+test("default prompt budget is platform-independent after stdin transport", () => {
+  assert.equal(DEFAULT_CONFIG.maxPromptBytes, 1_500_000);
+});
+
 test("bridge config accepts capabilities.image on a model", () => {
   assert.doesNotThrow(() =>
     validateBridgeConfig({
