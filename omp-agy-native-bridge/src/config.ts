@@ -25,7 +25,9 @@ export const DEFAULT_CONFIG: BridgeConfig = {
   hardTimeoutMs: 16 * 60 * 1_000,
   sandbox: true,
   maxConcurrent: 3,
-  maxPromptBytes: process.platform === "win32" ? 24_000 : 1_500_000,
+  // Provider prompts are written to the child's stdin, not argv, so the old
+  // native-Windows command-line ceiling no longer applies to this payload.
+  maxPromptBytes: 1_500_000,
   maxHistoryChars: 900_000,
   maxToolCatalogChars: 180_000,
   maxToolDescriptionChars: 4_000,
