@@ -43,6 +43,64 @@ test("buildOmpProviderModels emits only OMP provider-model fields", () => {
   ]);
 });
 
+test("buildOmpProviderModels uses bridge defaultEffort for the selector default", () => {
+  const [model] = buildOmpProviderModels(
+    [
+      {
+        ...base,
+        id: "gemini-3.7-flash",
+        agyModelIdsByEffort: {
+          low: "gemini-3.7-flash-low",
+          medium: "gemini-3.7-flash-medium",
+          high: "gemini-3.7-flash-high",
+        },
+      },
+    ],
+    true,
+    "low",
+  );
+  assert.equal(model.thinking?.defaultLevel, "low");
+});
+
+test("model effort overrides bridge defaultEffort in provider metadata", () => {
+  const [model] = buildOmpProviderModels(
+    [
+      {
+        ...base,
+        id: "gemini-3.7-flash",
+        effort: "medium" as const,
+        agyModelIdsByEffort: {
+          low: "gemini-3.7-flash-low",
+          medium: "gemini-3.7-flash-medium",
+          high: "gemini-3.7-flash-high",
+        },
+      },
+    ],
+    true,
+    "low",
+  );
+  assert.equal(model.thinking?.defaultLevel, "medium");
+});
+
+test("missing preferred tier falls back exactly like provider routing", () => {
+  const [model] = buildOmpProviderModels(
+    [
+      {
+        ...base,
+        id: "gemini-pro",
+        agyModelIdsByEffort: {
+          low: "gemini-pro-low",
+          high: "gemini-pro-high",
+        },
+      },
+    ],
+    true,
+    "medium",
+  );
+  assert.deepEqual(model.thinking?.efforts, ["low", "high"]);
+  assert.equal(model.thinking?.defaultLevel, "low");
+});
+
 test("buildOmpProviderModels keeps auto conservative for image input", () => {
   const [model] = buildOmpProviderModels(
     [{ ...base, id: "auto", name: "Auto" }],
