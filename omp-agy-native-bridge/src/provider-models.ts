@@ -31,6 +31,7 @@ function thinkingConfig(
   model: BridgeModelDefinition,
   defaultEffort?: AgyEffort,
 ): OmpProviderModelConfig["thinking"] {
+  if (!model.reasoning) return undefined;
   const routes = model.agyModelIdsByEffort;
   if (!routes) return undefined;
 
