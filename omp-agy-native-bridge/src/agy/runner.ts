@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { isDeepStrictEqual } from "node:util";
 
 import { buildAgyEnvironment } from "../env.ts";
 import { parseAgyEventLine } from "./ndjson.ts";
@@ -280,7 +281,11 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
           }
           if (event.event === "result") {
             if (terminal) {
-              parseFailure = new Error("agy emitted more than one terminal result event");
+              // AGY/model wrappers have duplicated other terminal payloads in the
+              // wild. An exact duplicate result is representation noise and safe
+              // to ignore. A conflicting second terminal remains a protocol error.
+              if (isDeepStrictEqual(terminal, event.result)) continue;
+              parseFailure = new Error("agy emitted conflicting terminal result events");
               terminate();
               break;
             }
