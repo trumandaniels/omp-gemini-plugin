@@ -22,6 +22,7 @@ import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
 import { resolveAgyModelSelection } from "./model-selection.ts";
+import { restoreOmpToolNames } from "./tool-alias.ts";
 import {
   appendToolChoiceInstruction,
   assertBridgeToolChoiceSatisfied,
@@ -161,8 +162,9 @@ export function createAgyProviderStream(
         }
 
         // OMP's toolChoice is a host-level semantic constraint. AGY has no
-        // native concept of OMP tools, so enforce it by narrowing the serialized
-        // OMP catalog and then validating the returned canonical tool calls.
+        // native concept of OMP tools, so enforce it by narrowing the canonical
+        // OMP catalog, exposing only opaque aliases, and validating the restored
+        // OMP calls after the provider envelope is parsed.
         const toolChoice = resolveBridgeToolChoice(context.tools ?? [], options?.toolChoice);
         const promptResult = buildProviderPrompt(
           { ...context, tools: toolChoice.tools },
@@ -170,7 +172,16 @@ export function createAgyProviderStream(
           stagedImages?.attachments ?? [],
         );
         const schema = buildBridgeOutputSchema(promptResult.toolNames);
-        const initialPrompt = appendToolChoiceInstruction(promptResult.prompt, toolChoice);
+        const requiredWireName = toolChoice.requiredToolName
+          ? promptResult.ompToWireToolName[toolChoice.requiredToolName]
+          : undefined;
+        if (toolChoice.requiredToolName && !requiredWireName) {
+          throw new Error(`OMP tool choice was not assigned a provider alias: ${toolChoice.requiredToolName}`);
+        }
+        const initialPrompt = appendToolChoiceInstruction(promptResult.prompt, {
+          requireToolCall: toolChoice.requireToolCall,
+          requiredToolName: requiredWireName,
+        });
         const resolved = resolveAgyModelSelection(
           selected,
           {
@@ -185,6 +196,7 @@ export function createAgyProviderStream(
           enforceToolless: config.rejectAgyToolUseInProviderMode,
           agentName: config.agentName,
           ompTools: promptResult.toolCatalog,
+          recipientAliases: promptResult.wireToOmpToolName,
           guardOptions: {
             cwd: requestCwd,
             allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
@@ -214,11 +226,12 @@ export function createAgyProviderStream(
           totalUsage = addUsage(mapAgyUsage(discarded), totalUsage);
         }
 
-        const output = parseProviderOutput(
+        const wireOutput = parseProviderOutput(
           result.terminal,
           promptResult.toolNames,
           options?.acceptEmptyResponse === true && !toolChoice.requireToolCall,
         );
+        const output = restoreOmpToolNames(wireOutput, promptResult.wireToOmpToolName);
         assertBridgeToolChoiceSatisfied(output, toolChoice);
         emitText(stream, message, output.text);
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
