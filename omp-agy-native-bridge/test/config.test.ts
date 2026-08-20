@@ -65,6 +65,28 @@ test("bridge config validates booleans and default effort from JSON-shaped value
   );
 });
 
+test("bridge config rejects effort metadata on non-reasoning models", () => {
+  const baseModel = {
+    id: "plain-model",
+    name: "Plain model",
+    reasoning: false,
+    contextWindow: 1_000_000,
+    maxTokens: 64_000,
+  };
+  assert.throws(
+    () => validateBridgeConfig({ ...DEFAULT_CONFIG, models: [{ ...baseModel, effort: "low" }] }),
+    /cannot define effort when reasoning=false/,
+  );
+  assert.throws(
+    () =>
+      validateBridgeConfig({
+        ...DEFAULT_CONFIG,
+        models: [{ ...baseModel, agyModelIdsByEffort: { low: "plain-low" } }],
+      }),
+    /cannot define agyModelIdsByEffort when reasoning=false/,
+  );
+});
+
 test("bridge config rejects ambiguous or malformed effort route maps", () => {
   const baseModel = {
     id: "route-test",
