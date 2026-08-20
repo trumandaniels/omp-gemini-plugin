@@ -201,6 +201,33 @@ function structuredHostReturn(message: string, tools: readonly SerializedTool[])
   }
 }
 
+function structuredToolReturn(
+  message: string,
+  recipient: string,
+  tools: readonly SerializedTool[],
+): BridgeStructuredOutput | undefined {
+  const tool = tools.find((candidate) => normalizedToken(candidate.name) === normalizedToken(recipient));
+  if (!tool) return undefined;
+
+  let argumentsValue: unknown;
+  try {
+    argumentsValue = JSON.parse(message);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(argumentsValue)) return undefined;
+
+  try {
+    return parseBridgeStructuredOutput({
+      text: "",
+      tool_calls: [{ name: tool.name, arguments: argumentsValue }],
+      finish_reason: "tool_use",
+    }, tools.map((candidate) => candidate.name));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Convert a proven side-effect-free AGY missing-recipient failure into the OMP
  * response the model was trying to deliver, without asking AGY to reason again.
@@ -215,28 +242,35 @@ function structuredHostReturn(message: string, tools: readonly SerializedTool[])
  *   `task` or `subagent` recipient is not valid OMP or AGY routing.
  *
  * This deliberately handles only cases with unambiguous transport semantics:
- * - recipient omp/parent/main + a valid bridge JSON envelope => that envelope;
+ * - recipient omp/parent/main + a bridge envelope or substantive plain text =>
+ *   that host return;
+ * - recipient matching an available OMP tool + JSON-object payload => a call to
+ *   that exact tool;
  * - recipient task or a generic agent/subagent role + one substantive failed
  *   message => an OMP task tool call using the exact live OMP task schema.
  *
- * Other recipients (for example `read`) still use the bounded prompt retry path
- * because a free-form send_message payload cannot be safely converted into that
- * tool's structured arguments.
+ * Free-form messages to ordinary tool recipients still use the bounded prompt
+ * retry path because their structured arguments cannot be derived safely.
  */
 export function synthesizeMissingRecipientRecovery(
   error: unknown,
   recipient: string,
   tools: readonly SerializedTool[],
+  failedRecipient = recipient,
 ): AgyRunResult | undefined {
   if (!(error instanceof AgyRunError)) return undefined;
-  const message = failedSendMessage(error, recipient);
+  const message = failedSendMessage(error, failedRecipient);
   if (!message) return undefined;
-
   const normalizedRecipient = normalizedToken(recipient);
   if (HOST_RETURN_RECIPIENTS.has(normalizedRecipient)) {
     const output = structuredHostReturn(message, tools);
-    return output ? syntheticResult(output) : undefined;
+    if (output) return syntheticResult(output);
+    if (message.length < 2 || CONTROL_ONLY_MESSAGES.has(normalizedToken(message))) return undefined;
+    return syntheticResult({ text: message, tool_calls: [], finish_reason: "stop" });
   }
+
+  const toolOutput = structuredToolReturn(message, recipient, tools);
+  if (toolOutput) return syntheticResult(toolOutput);
 
   const isSubagentRole = SUBAGENT_ROLE_RECIPIENTS.has(normalizedRecipient);
   const isTaskRecipient = normalizedRecipient === "task";

@@ -107,29 +107,63 @@ const flatTaskTool: SerializedTool = {
   },
 };
 
-test("failed send_message to OMP recovers only a valid bridge envelope", () => {
+test("failed send_message to a host recipient recovers envelopes and plain final text", () => {
   const envelope = JSON.stringify({
     text: "The audit is complete.",
     tool_calls: [],
     finish_reason: "stop",
   });
-  const result = synthesizeMissingRecipientRecovery(
+  const envelopeResult = synthesizeMissingRecipientRecovery(
     missingRecipientError("omp", envelope),
     "omp",
     [],
   );
 
-  assert.deepEqual(result?.terminal.structured_output, {
+  assert.deepEqual(envelopeResult?.terminal.structured_output, {
     text: "The audit is complete.",
     tool_calls: [],
     finish_reason: "stop",
   });
-  assert.equal(result?.toolSteps.length, 0);
+  assert.equal(envelopeResult?.toolSteps.length, 0);
+
+  const textResult = synthesizeMissingRecipientRecovery(
+    missingRecipientError("main", "The audit is complete."),
+    "main",
+    [],
+  );
+  assert.deepEqual(textResult?.terminal.structured_output, {
+    text: "The audit is complete.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
+test("failed send_message to an OMP tool recovers JSON arguments", () => {
+  const readTool: SerializedTool = {
+    name: "read",
+    description: "Read a file",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+  };
+  const result = synthesizeMissingRecipientRecovery(
+    missingRecipientError("read", JSON.stringify({ path: "src/provider.ts" })),
+    "read",
+    [readTool],
+  );
+
+  assert.deepEqual(result?.terminal.structured_output, {
+    text: "",
+    tool_calls: [{ name: "read", arguments: { path: "src/provider.ts" } }],
+    finish_reason: "tool_use",
+  });
   assert.equal(
     synthesizeMissingRecipientRecovery(
-      missingRecipientError("omp", "plain final text"),
-      "omp",
-      [],
+      missingRecipientError("read", "read src/provider.ts"),
+      "read",
+      [readTool],
     ),
     undefined,
   );
@@ -382,6 +416,38 @@ test("provider attempts can recover an exact bridge envelope addressed to OMP", 
     text: "I found three UI issues.",
     tool_calls: [],
     finish_reason: "stop",
+  });
+});
+
+test("provider attempts recover JSON arguments sent to an opaque capability recipient", async () => {
+  let calls = 0;
+  const readTool: SerializedTool = {
+    name: "read",
+    description: "Read a file",
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    },
+  };
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Read package.json",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    ompTools: [readTool],
+    recipientAliases: { omp_capability_02: "read", read: "read" },
+    invoke: async () => {
+      calls += 1;
+      throw missingRecipientError("omp_capability_02", JSON.stringify({ path: "package.json" }));
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(outcome.attempts, 1);
+  assert.deepEqual(outcome.result.terminal.structured_output, {
+    text: "",
+    tool_calls: [{ name: "omp_capability_02", arguments: { path: "package.json" } }],
+    finish_reason: "tool_use",
   });
 });
 

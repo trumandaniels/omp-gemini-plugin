@@ -271,7 +271,12 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
     if (options.ompTools === undefined) return undefined;
     const canonicalRecipient = options.recipientAliases?.[recipient] ?? recipient;
-    const synthesized = synthesizeMissingRecipientRecovery(error, canonicalRecipient, options.ompTools);
+    const synthesized = synthesizeMissingRecipientRecovery(
+      error,
+      canonicalRecipient,
+      options.ompTools,
+      recipient,
+    );
     return synthesized ? aliasSyntheticToolCalls(synthesized, options.recipientAliases) : undefined;
   };
 
