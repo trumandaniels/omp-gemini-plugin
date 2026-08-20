@@ -112,6 +112,17 @@ function parseProviderOutput(
   }
 }
 
+/**
+ * `acceptEmptyResponse` is present in newer OMP SimpleStreamOptions but did not
+ * exist in OMP 17.2.12. Read it through a structural compatibility extension so
+ * one bridge build typechecks against both host generations while preserving the
+ * newer runtime behavior when the field is supplied.
+ */
+function acceptsEmptyResponse(options?: SimpleStreamOptions): boolean {
+  const compat = options as (SimpleStreamOptions & { acceptEmptyResponse?: boolean }) | undefined;
+  return compat?.acceptEmptyResponse === true;
+}
+
 export function createAgyProviderStream(
   config: BridgeConfig,
   semaphore: Semaphore,
@@ -229,7 +240,7 @@ export function createAgyProviderStream(
         const wireOutput = parseProviderOutput(
           result.terminal,
           promptResult.toolNames,
-          options?.acceptEmptyResponse === true && !toolChoice.requireToolCall,
+          acceptsEmptyResponse(options) && !toolChoice.requireToolCall,
         );
         const output = restoreOmpToolNames(wireOutput, promptResult.wireToOmpToolName);
         assertBridgeToolChoiceSatisfied(output, toolChoice);
