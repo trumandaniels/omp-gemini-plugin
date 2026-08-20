@@ -23,7 +23,11 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
     models: mergeDiscoveredModels(baseConfig.models, discovery, baseConfig),
   };
   const semaphore = new Semaphore(config.maxConcurrent);
-  const providerModels = buildOmpProviderModels(config.models, config.enableImageInput);
+  const providerModels = buildOmpProviderModels(
+    config.models,
+    config.enableImageInput,
+    config.defaultEffort,
+  );
   const streamSimple = createAgyProviderStream(config, semaphore, process.cwd());
   const bundledAgent = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
 
