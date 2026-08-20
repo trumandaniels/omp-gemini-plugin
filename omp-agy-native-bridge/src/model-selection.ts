@@ -76,7 +76,10 @@ export function resolveAgyModelSelection(
     return { model: route, effort: undefined };
   }
 
-  const effort = normalizedEffort ?? model.effort;
+  // Direct AGY model slugs still support the CLI's --effort flag. Apply the
+  // bridge-wide default here just as we do for auto and tiered models; otherwise
+  // AGY_BRIDGE_EFFORT/defaultEffort is silently ignored for non-tiered models.
+  const effort = normalizedEffort ?? model.effort ?? defaultEffort;
   return {
     model: model.agyModelId ?? model.id,
     effort,
