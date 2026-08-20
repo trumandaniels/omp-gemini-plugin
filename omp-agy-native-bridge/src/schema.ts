@@ -19,10 +19,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * Detect a bridge-shaped object from semantic fields only.
+ *
+ * `finish_reason` is deliberately excluded: it is redundant transport metadata
+ * and AGY versions/models have emitted it with different spellings, casing, or
+ * not at all. The bridge derives the canonical completion reason from validated
+ * tool calls instead.
+ */
 function isBridgeEnvelope(value: unknown): value is Record<string, unknown> {
   return isRecord(value)
-    && Array.isArray(value.tool_calls)
-    && (value.finish_reason === "stop" || value.finish_reason === "tool_use");
+    && Object.prototype.hasOwnProperty.call(value, "text")
+    && Array.isArray(value.tool_calls);
 }
 
 function firstBridgeEnvelope(value: unknown): Record<string, unknown> | undefined {
@@ -32,7 +40,7 @@ function firstBridgeEnvelope(value: unknown): Record<string, unknown> | undefine
 }
 
 function nestedBridgeEnvelope(value: Record<string, unknown>): Record<string, unknown> | undefined {
-  if (!Array.isArray(value.tool_calls) || value.tool_calls.length > 0 || value.finish_reason !== "stop") {
+  if (!Array.isArray(value.tool_calls) || value.tool_calls.length > 0) {
     return undefined;
   }
   return firstBridgeEnvelope(value.text);
@@ -346,12 +354,12 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
       tool_calls: uniqueNames.length > 0
         ? { type: "array", items: toolCallItems, maxItems: 32 }
         : { type: "array", maxItems: 0 },
-      finish_reason: {
-        type: "string",
-        enum: uniqueNames.length > 0 ? ["stop", "tool_use"] : ["stop"],
-      },
+      // Compatibility-only input. Different AGY releases/model wrappers have
+      // produced different spellings/shapes here. The bridge never trusts it;
+      // canonical completion state is derived from the validated tool_calls.
+      finish_reason: {},
     },
-    required: ["text", "tool_calls", "finish_reason"],
+    required: ["text", "tool_calls"],
   };
 }
 
@@ -376,9 +384,6 @@ function parseBridgeStructuredOutputInternal(
 
   if (!Array.isArray(value.tool_calls)) throw new Error("agy structured_output.tool_calls must be an array");
   const text = normalizeBridgeText(value.text);
-  if (value.finish_reason !== "stop" && value.finish_reason !== "tool_use") {
-    throw new Error("agy structured_output.finish_reason must be stop or tool_use");
-  }
   if (value.tool_calls.length > 32) throw new Error("agy requested more than 32 tools in one turn");
 
   const allowed = new Set(allowedToolNames);
@@ -405,20 +410,15 @@ function parseBridgeStructuredOutputInternal(
     };
   });
 
-  if (calls.length > 0 && value.finish_reason !== "tool_use") {
-    throw new Error("finish_reason must be tool_use when tool_calls is non-empty");
-  }
-  if (calls.length === 0 && value.finish_reason !== "stop") {
-    throw new Error("finish_reason must be stop when tool_calls is empty");
-  }
   if (calls.length === 0 && text.length === 0) {
     throw new Error("agy structured_output must contain text or at least one tool call");
   }
 
+  const finishReason: BridgeStructuredOutput["finish_reason"] = calls.length > 0 ? "tool_use" : "stop";
   return {
     text,
     tool_calls: calls,
-    finish_reason: value.finish_reason,
+    finish_reason: finishReason,
   };
 }
 
