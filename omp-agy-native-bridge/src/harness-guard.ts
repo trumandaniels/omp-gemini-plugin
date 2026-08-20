@@ -128,10 +128,12 @@ const RETRYABLE_CONTROL_ACTIONS = new Map<string, ReadonlySet<string>>([
   ["managetask", new Set(["list", "status"])],
   ["managesubagents", new Set(["list"])],
 ]);
+const RETRYABLE_PROVIDER_PLANNING_TOOLS: Record<string, true> = { schedule: true };
 
 /**
- * Return the harmless AGY control probes that may be discarded and retried once.
- * Mutating actions such as kill, kill_all, send_input, define, or invoke never qualify.
+ * Return AGY control activity that a corrected provider attempt may discard.
+ * Read-only status probes and provider-local planning do not touch the workspace
+ * or invoke a subagent. Mutating task controls never qualify.
  */
 export function retryableProviderControlToolNames(
   events: readonly AgyStepUpdateEvent[],
@@ -140,7 +142,9 @@ export function retryableProviderControlToolNames(
   const unexpected = unexpectedProviderHarnessToolSteps(events, options);
   if (unexpected.length === 0) return undefined;
   for (const event of unexpected) {
-    const allowedActions = RETRYABLE_CONTROL_ACTIONS.get(normalizedToolName(toolStepName(event)));
+    const name = normalizedToolName(toolStepName(event));
+    if (RETRYABLE_PROVIDER_PLANNING_TOOLS[name]) continue;
+    const allowedActions = RETRYABLE_CONTROL_ACTIONS.get(name);
     const action = toolAction(event);
     if (!allowedActions || !action || !allowedActions.has(action)) return undefined;
   }

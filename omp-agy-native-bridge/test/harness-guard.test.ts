@@ -62,14 +62,15 @@ test("provider guard puts the exact AGY control tool before the long diagnostic"
   );
 });
 
-test("retryableProviderControlToolNames accepts only harmless list and status probes", () => {
+test("retryableProviderControlToolNames accepts harmless probes and provider-local planning", () => {
   assert.deepEqual(
     retryableProviderControlToolNames([
       toolEvent("ACTIVE", 1, "manage_subagents", { Action: "list" }),
       toolEvent("DONE", 1, "manage_subagents", { Action: "list" }),
       toolEvent("DONE", 2, "manage_task", { action: "status", TaskId: "task-1" }),
+      toolEvent("DONE", 3, "schedule", { tasks: [{ description: "Inspect the repository" }] }),
     ]),
-    ["manage_subagents", "manage_task"],
+    ["manage_subagents", "manage_task", "schedule"],
   );
 });
 

@@ -35,6 +35,23 @@ function sendMessageEvent(
   return sendMessageParametersEvent(state, { recipient, message });
 }
 
+function manageTaskEvent(state: string): AgyStepUpdateEvent {
+  return {
+    event: "step_update",
+    step_update: {
+      conversation_id: "conversation-1",
+      step_index: 8,
+      state,
+      step_type: "tool",
+      tool_name: "manage_task",
+      tool_info: {
+        name: "manage_task",
+        parameters: { Action: "list" },
+      },
+    },
+  };
+}
+
 function missingRecipientError(
   recipient: string,
   message: string,
@@ -85,7 +102,10 @@ const batchTaskTool: SerializedTool = {
         type: "array",
         items: {
           type: "object",
-          properties: { task: { type: "string" } },
+          properties: {
+            task: { type: "string" },
+            name: { type: "string" },
+          },
           required: ["task"],
         },
       },
@@ -191,6 +211,31 @@ test("failed send_message to subagent becomes an OMP batch task call", () => {
   });
 });
 
+test("failed send_message to a named missing agent becomes a named OMP task", () => {
+  const result = synthesizeMissingRecipientRecovery(
+    missingRecipientError("dummy", "Identify the running development server and report its URL."),
+    "dummy",
+    [batchTaskTool],
+  );
+
+  assert.deepEqual(result?.terminal.structured_output, {
+    text: "",
+    tool_calls: [
+      {
+        name: "task",
+        arguments: {
+          context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
+          tasks: [{
+            task: "Identify the running development server and report its URL.",
+            name: "dummy",
+          }],
+        },
+      },
+    ],
+    finish_reason: "tool_use",
+  });
+});
+
 test("failed send_message to literal task becomes the real OMP task tool call", () => {
   const result = synthesizeMissingRecipientRecovery(
     missingRecipientError("task", "Audit the website UI and UX and return concrete fixes."),
@@ -283,11 +328,16 @@ test("deterministic recovery refuses ambiguous, control-only, unsupported, or un
     ),
     undefined,
   );
+  const readTool: SerializedTool = {
+    name: "read",
+    description: "Read a file",
+    parameters: { type: "object", properties: {} },
+  };
   assert.equal(
     synthesizeMissingRecipientRecovery(
       missingRecipientError("read", "package.json"),
       "read",
-      [batchTaskTool],
+      [batchTaskTool, readTool],
     ),
     undefined,
   );
@@ -392,6 +442,35 @@ test("provider attempts short-circuit recipient task with AGY parameter casing i
   });
 });
 
+test("provider attempts recover a missing host recipient after a harmless AGY control probe", async () => {
+  let calls = 0;
+  const error = missingRecipientError("omp", "The audit is complete.", {
+    toolSteps: [
+      sendMessageEvent("ACTIVE", "omp", "The audit is complete."),
+      sendMessageEvent("DONE", "omp", "The audit is complete."),
+      manageTaskEvent("ACTIVE"),
+      manageTaskEvent("DONE"),
+    ],
+  });
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Audit the project",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    ompTools: [],
+    invoke: async () => {
+      calls += 1;
+      throw error;
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.deepEqual(outcome.result.terminal.structured_output, {
+    text: "The audit is complete.",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
 test("provider attempts can recover an exact bridge envelope addressed to OMP", async () => {
   let calls = 0;
   const envelope = JSON.stringify({
@@ -460,7 +539,7 @@ test("unsupported missing recipients keep the existing bounded retry path", asyn
     ompTools: [batchTaskTool],
     invoke: async () => {
       calls += 1;
-      if (calls === 1) throw missingRecipientError("read", "package.json");
+      if (calls === 1) throw missingRecipientError("omp_capability_99", "package.json");
       return successfulResult();
     },
   });

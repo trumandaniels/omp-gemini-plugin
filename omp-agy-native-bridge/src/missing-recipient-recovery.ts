@@ -121,7 +121,11 @@ function requiredKeys(schema: Record<string, unknown>): Set<string> {
   );
 }
 
-function taskArguments(tool: SerializedTool, task: string): Record<string, unknown> | undefined {
+function taskArguments(
+  tool: SerializedTool,
+  task: string,
+  recipientName?: string,
+): Record<string, unknown> | undefined {
   const properties = schemaProperties(tool);
   if (!properties) return undefined;
   const required = requiredKeys(tool.parameters);
@@ -148,8 +152,12 @@ function taskArguments(tool: SerializedTool, task: string): Record<string, unkno
       if (key !== "task") return undefined;
     }
 
+    const item: Record<string, unknown> = { task };
+    if (recipientName && Object.prototype.hasOwnProperty.call(itemProperties, "name")) {
+      item.name = recipientName;
+    }
     const args: Record<string, unknown> = {
-      tasks: [{ task }],
+      tasks: [item],
     };
     if (Object.prototype.hasOwnProperty.call(properties, "context")) {
       args.context = "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.";
@@ -162,7 +170,11 @@ function taskArguments(tool: SerializedTool, task: string): Record<string, unkno
     for (const key of required) {
       if (key !== "task") return undefined;
     }
-    return { task };
+    const args: Record<string, unknown> = { task };
+    if (recipientName && Object.prototype.hasOwnProperty.call(properties, "name")) {
+      args.name = recipientName;
+    }
+    return args;
   }
 
   return undefined;
@@ -246,11 +258,9 @@ function structuredToolReturn(
  *   that host return;
  * - recipient matching an available OMP tool + JSON-object payload => a call to
  *   that exact tool;
- * - recipient task or a generic agent/subagent role + one substantive failed
- *   message => an OMP task tool call using the exact live OMP task schema.
- *
- * Free-form messages to ordinary tool recipients still use the bounded prompt
- * retry path because their structured arguments cannot be derived safely.
+ * - recipient task, a generic agent/subagent role, or a named missing agent +
+ *   one substantive failed message => an OMP task tool call using the exact
+ *   live OMP task schema.
  */
 export function synthesizeMissingRecipientRecovery(
   error: unknown,
@@ -274,12 +284,19 @@ export function synthesizeMissingRecipientRecovery(
 
   const isSubagentRole = SUBAGENT_ROLE_RECIPIENTS.has(normalizedRecipient);
   const isTaskRecipient = normalizedRecipient === "task";
-  if (!isSubagentRole && !isTaskRecipient) return undefined;
+  const matchesAvailableTool = tools.some((tool) => normalizedToken(tool.name) === normalizedRecipient);
+  const isOpaqueCapability = normalizedRecipient.startsWith("ompcapability");
+  const isNamedAgent = !matchesAvailableTool && !isOpaqueCapability;
+  if (!isSubagentRole && !isTaskRecipient && !isNamedAgent) return undefined;
   if (message.length < 8 || CONTROL_ONLY_MESSAGES.has(normalizedToken(message))) return undefined;
 
   const taskTool = tools.find((tool) => normalizedToken(tool.name) === "task");
   if (!taskTool) return undefined;
-  const args = taskArguments(taskTool, message);
+  const args = taskArguments(
+    taskTool,
+    message,
+    isNamedAgent && !isSubagentRole ? recipient : undefined,
+  );
   if (!args) return undefined;
 
   return syntheticResult({

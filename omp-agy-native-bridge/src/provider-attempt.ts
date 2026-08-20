@@ -127,12 +127,17 @@ export function retryableMissingAgyRecipient(
   }
 
   const expectedRecipient = normalizedToken(missingRecipient);
+  const controlEvents: AgyStepUpdateEvent[] = [];
   for (const event of unexpected) {
-    if (normalizedToken(toolStepName(event)) !== "sendmessage") return undefined;
+    if (normalizedToken(toolStepName(event)) !== "sendmessage") {
+      controlEvents.push(event);
+      continue;
+    }
     const recipients = collectRecipients(event.step_update.tool_info?.parameters ?? {});
     if (recipients.length === 0) return undefined;
     if (recipients.some((recipient) => normalizedToken(recipient) !== expectedRecipient)) return undefined;
   }
+  if (controlEvents.length > 0 && !retryableProviderControlToolNames(controlEvents, options)) return undefined;
 
   return missingRecipient;
 }
