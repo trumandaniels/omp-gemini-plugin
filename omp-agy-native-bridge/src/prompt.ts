@@ -39,7 +39,7 @@ The previous attempt was discarded because it left provider-only structured-outp
 export function appendMissingAgyRecipientRetryInstruction(prompt: string, recipient: string): string {
   const recipientName = JSON.stringify(recipient);
   return `${prompt}\n\n# Mandatory provider routing correction
-The previous attempt was discarded because it tried to use internal Antigravity messaging toward recipient named ${recipientName}, and that recipient does not exist.
+The previous attempt was discarded because it tried to use internal Antigravity messaging toward ${recipientName}; the recipient named ${recipientName} does not exist.
 - Provider mode has no internal messaging return path. Do not address any agent, role, host, capability, or label as an Antigravity recipient.
 - OMP is the host application and dispatcher, not an Antigravity conversation peer.
 - Produce the enforced terminal JSON object directly.
