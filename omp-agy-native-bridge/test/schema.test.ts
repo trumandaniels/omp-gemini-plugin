@@ -259,31 +259,30 @@ test("parseAgyTerminalOutput falls through when structured_output is null", () =
   assert.equal(parsed.text, "null handled");
 });
 
-test("parseAgyTerminalOutput rejects malformed structured_output even with good response", () => {
-  assert.throws(
-    () =>
-      parseAgyTerminalOutput(
-        {
-          structured_output: "not-json",
-          response: '{"text":"fallback","tool_calls":[],"finish_reason":"stop"}',
-        },
-        ["read"],
-      ),
-    /Unexpected token|must be an object|structured_output must be an object/,
+test("parseAgyTerminalOutput recovers malformed serialized structured_output from response", () => {
+  assert.deepEqual(
+    parseAgyTerminalOutput(
+      {
+        structured_output: "not-json",
+        response: '{"text":"fallback","tool_calls":[],"finish_reason":"stop"}',
+      },
+      ["read"],
+    ),
+    { text: "fallback", tool_calls: [], finish_reason: "stop" },
   );
 });
 
-test("parseAgyTerminalOutput rejects invalid parsed JSON response schema", () => {
-  assert.throws(
-    () =>
-      parseAgyTerminalOutput(
-        {
-          response: '{"text":1,"tool_calls":[],"finish_reason":"stop"}',
-        },
-        [],
-      ),
-    /structured_output\.text must be a string/,
+test("parseAgyTerminalOutput normalizes scalar text values", () => {
+  assert.deepEqual(
+    parseAgyTerminalOutput(
+      {
+        response: '{"text":1,"tool_calls":[],"finish_reason":"stop"}',
+      },
+      [],
+    ),
+    { text: "1", tool_calls: [], finish_reason: "stop" },
   );
+  assert.equal(parseBridgeStructuredOutput({ text: false }, []).text, "false");
 });
 
 test("parseAgyTerminalOutput rejects unknown tools in response JSON", () => {
@@ -304,5 +303,9 @@ test("parseAgyTerminalOutput rejects blank output", () => {
   assert.throws(
     () => parseAgyTerminalOutput({ response: "   \n" }, []),
     /agy returned neither structured_output nor non-empty response text/,
+  );
+  assert.throws(
+    () => parseBridgeStructuredOutput({}, []),
+    /must contain text or at least one tool call/,
   );
 });
