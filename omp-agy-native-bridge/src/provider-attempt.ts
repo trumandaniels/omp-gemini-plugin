@@ -16,15 +16,7 @@ import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 
 const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|“([^”]+)”|‘([^’]+)’|([a-zA-Z0-9_.-]+))\s+(?:was\s+)?not\s+found\.?$/i;
 const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
-const RETRYABLE_PERMISSION_CONVERSION_TOOLS = new Set([
-  "schedule",
-  "managetask",
-  "managesubagents",
-  "manageinbox",
-  "definesubagent",
-  "invokesubagent",
-  "sendmessage",
-]);
+const MAX_PERMISSION_CONVERSION_RECOVERIES = 3;
 
 function normalizedToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -86,6 +78,21 @@ This third attempt is the final safe recovery attempt for this OMP turn.
 - Continue from the supplied OMP prompt only. Ignore all attempted Antigravity messaging from discarded attempts.`;
 }
 
+function appendPermissionConversionRecovery(
+  prompt: string,
+  toolNames: readonly string[],
+  recoveryNumber: number,
+): string {
+  const corrected = appendProviderHarnessRetryInstruction(prompt, toolNames);
+  if (recoveryNumber <= 1) return corrected;
+  const names = [...new Set(toolNames)].sort().join(", ") || "unknown";
+  return `${corrected}\n\n# Repeated provider transport correction
+This is safe recovery attempt ${recoveryNumber} after repeated pre-execution Antigravity permission-conversion failures involving: ${names}.
+- A previous corrected attempt still tried to invoke the inner Antigravity harness. Do not plan, coordinate, inspect, message, schedule, delegate, or manage work through Antigravity on this attempt.
+- Skip all Antigravity tool selection. Produce the enforced terminal structured object directly.
+- OMP tool requests belong only in the outer \"tool_calls\" array. A normal answer belongs only in \"text\".`;
+}
+
 /**
  * Classify only an exact, side-effect-free AGY missing-recipient failure.
  *
@@ -139,12 +146,14 @@ export function isRetryableMissingOmpRecipientError(
  * that tool call into a permission descriptor. The CLI reports this as a
  * terminal ERROR such as:
  *
- *   declaring permissions: cortex tool schedule: convert tool call for permissions: ...
+ *   declaring permissions: cortex tool manage_task: convert tool call for permissions: ...
  *
- * A single retry is safe only when the named tool is one of the provider-mode
- * tools we explicitly forbid, every captured activity record is complete, no
- * subagent exists, and no non-media AGY tool lifecycle event was observed. The
- * permission-conversion failure occurs before that named tool executes.
+ * Every Antigravity tool is forbidden in provider mode, so the tool name itself
+ * is not an allowlist decision. Recovery is safe only when the diagnostic proves
+ * permission conversion failed before execution, every captured activity record
+ * is complete, no subagent exists, and no non-media AGY tool lifecycle event was
+ * observed. This also makes the adapter forward-compatible with new AGY control
+ * tool names without weakening the no-side-effect proof.
  */
 export function retryablePermissionConversionTool(
   error: unknown,
@@ -157,7 +166,6 @@ export function retryablePermissionConversionTool(
   const match = PERMISSION_CONVERSION_FAILURE.exec(terminalError.trim());
   if (!match) return undefined;
   const toolName = match[1];
-  if (!RETRYABLE_PERMISSION_CONVERSION_TOOLS.has(normalizedToken(toolName))) return undefined;
   if (!providerHarnessSnapshotsComplete(error)) return undefined;
   if (error.subagents.length > 0) return undefined;
   if (unexpectedProviderHarnessToolSteps(error.toolSteps, options).length > 0) return undefined;
@@ -182,27 +190,54 @@ export interface ProviderAttemptOutcome {
 }
 
 /**
- * Run AGY with a tightly bounded provider-mode recovery budget.
+ * Run AGY with tightly bounded provider-mode recovery budgets.
  *
- * When the failed AGY send is unambiguous, prefer deterministic transport
- * recovery over another model call: messages addressed to OMP become final text,
- * while generic subagent-role messages become an OMP `task` tool call using the
- * exact current task schema. This removes the recurring `recipient "omp"` /
- * `recipient "subagent"` loop without trusting arbitrary recipient names.
+ * Every AGY invocation passes through the same permission-conversion recovery
+ * wrapper. That matters because a pre-execution inner-harness failure can happen
+ * on the initial request, on a missing-recipient correction, or on a harmless
+ * control-probe retry. Up to three proven side-effect-free permission failures
+ * are discarded across the whole OMP turn; a fourth is surfaced rather than
+ * risking an unbounded model loop.
  *
- * Other missing-recipient failures retain the bounded prompt-retry path. A third
- * AGY process is allowed only when both the first attempt and its corrected retry
- * fail with an exact, side-effect-free missing-recipient error. No fourth attempt
- * is ever made.
+ * When a failed AGY send is unambiguous, prefer deterministic transport recovery
+ * over another model call: messages addressed to OMP become final text, while
+ * generic subagent-role messages become an OMP `task` tool call using the exact
+ * current task schema.
  */
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
   let attempts = 0;
   let retried = false;
+  let permissionRecoveries = 0;
+  const permissionTools = new Set<string>();
+  const guardOptions = options.guardOptions ?? {};
 
   const invoke = async (prompt: string): Promise<AgyRunResult> => {
     attempts += 1;
     return options.invoke(prompt);
+  };
+
+  const invokeRecoveringPermissionConversion = async (prompt: string): Promise<AgyRunResult> => {
+    let currentPrompt = prompt;
+    while (true) {
+      try {
+        return await invoke(currentPrompt);
+      } catch (error) {
+        if (!options.enforceToolless) throw error;
+        const permissionTool = retryablePermissionConversionTool(error, guardOptions);
+        if (!permissionTool) throw error;
+        if (permissionRecoveries >= MAX_PERMISSION_CONVERSION_RECOVERIES) throw error;
+
+        recordDiscardedUsage(error, discardedUsage);
+        permissionRecoveries += 1;
+        permissionTools.add(permissionTool);
+        currentPrompt = appendPermissionConversionRecovery(
+          prompt,
+          [...permissionTools],
+          permissionRecoveries,
+        );
+      }
+    }
   };
 
   const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
@@ -210,44 +245,37 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     return synthesizeMissingRecipientRecovery(error, recipient, options.ompTools);
   };
 
-  const guardOptions = options.guardOptions ?? {};
   let result: AgyRunResult;
   try {
-    result = await invoke(options.initialPrompt);
+    result = await invokeRecoveringPermissionConversion(options.initialPrompt);
   } catch (error) {
     if (!options.enforceToolless) throw error;
 
     const missingRecipient = retryableMissingAgyRecipient(error, guardOptions);
-    if (missingRecipient) {
-      recordDiscardedUsage(error, discardedUsage);
-      const synthesized = deterministicRecovery(error, missingRecipient);
-      if (synthesized) {
-        result = synthesized;
-      } else {
-        retried = true;
-        const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
-        try {
-          result = await invoke(correctedPrompt);
-        } catch (retryError) {
-          const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
-          if (!repeatedRecipient) throw retryError;
-          recordDiscardedUsage(retryError, discardedUsage);
-          const synthesizedRetry = deterministicRecovery(retryError, repeatedRecipient);
-          if (synthesizedRetry) {
-            result = synthesizedRetry;
-          } else {
-            result = await invoke(
-              appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
-            );
-          }
+    if (!missingRecipient) throw error;
+
+    recordDiscardedUsage(error, discardedUsage);
+    const synthesized = deterministicRecovery(error, missingRecipient);
+    if (synthesized) {
+      result = synthesized;
+    } else {
+      retried = true;
+      const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
+      try {
+        result = await invokeRecoveringPermissionConversion(correctedPrompt);
+      } catch (retryError) {
+        const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
+        if (!repeatedRecipient) throw retryError;
+        recordDiscardedUsage(retryError, discardedUsage);
+        const synthesizedRetry = deterministicRecovery(retryError, repeatedRecipient);
+        if (synthesizedRetry) {
+          result = synthesizedRetry;
+        } else {
+          result = await invokeRecoveringPermissionConversion(
+            appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
+          );
         }
       }
-    } else {
-      const permissionTool = retryablePermissionConversionTool(error, guardOptions);
-      if (!permissionTool) throw error;
-      recordDiscardedUsage(error, discardedUsage);
-      retried = true;
-      result = await invoke(appendProviderHarnessRetryInstruction(options.initialPrompt, [permissionTool]));
     }
   }
 
@@ -259,7 +287,9 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     if (retryTools && !retried) {
       if (result.terminal.usage) discardedUsage.push(result.terminal.usage);
       retried = true;
-      result = await invoke(appendProviderHarnessRetryInstruction(options.initialPrompt, retryTools));
+      result = await invokeRecoveringPermissionConversion(
+        appendProviderHarnessRetryInstruction(options.initialPrompt, retryTools),
+      );
     }
 
     assertProviderHarnessIsToolless(result, options.agentName, guardOptions);
