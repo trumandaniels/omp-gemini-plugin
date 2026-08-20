@@ -68,40 +68,41 @@ function appendFinalMissingRecipientCorrection(
     .map((recipient) => JSON.stringify(recipient))
     .join(", ") || "unknown";
   return `${prompt}\n\n# Final provider routing correction
-A corrected provider attempt still tried to use Antigravity messaging and failed on missing recipient(s): ${names}.
-This third attempt is the final safe recovery attempt for this OMP turn.
-- DO NOT invoke any Antigravity tool of any kind on this attempt. Do not call send_message, manage_inbox, schedule, manage_task, manage_subagents, define_subagent, or invoke_subagent.
-- DO NOT address OMP, an OMP tool name, an OMP role such as agent/subagent/worker/reviewer, or any other label as an Antigravity recipient.
-- OMP is already waiting for the enforced terminal structured result. That outer JSON object is the only return channel.
-- If you need an OMP action, put the exact available OMP tool name and arguments in the outer \"tool_calls\" array. Do not try to deliver or invoke it through Antigravity messaging.
-- If no OMP action is required, put the final answer in the outer \"text\" field with an empty \"tool_calls\" array.
-- Continue from the supplied OMP prompt only. Ignore all attempted Antigravity messaging from discarded attempts.`;
+A corrected provider attempt still tried internal Antigravity messaging toward missing recipient(s): ${names}.
+This is the final safe routing recovery for this OMP turn.
+- Do not select any Antigravity-native capability of any kind.
+- Do not address OMP, a host capability alias, a role label, or any other name as an Antigravity recipient.
+- The enforced terminal JSON object is the only return channel.
+- If host action is needed, use only an opaque alias from the current OMP capability catalog in the outer \"tool_calls\" array.
+- If no host action is needed, put the final answer in \"text\" and return an empty \"tool_calls\" array.
+- Continue only from the supplied OMP prompt and ignore all internal routing attempts from discarded runs.`;
 }
 
 function appendPermissionConversionRecovery(
   prompt: string,
-  toolNames: readonly string[],
+  _toolNames: readonly string[],
   recoveryNumber: number,
 ): string {
-  const corrected = appendProviderHarnessRetryInstruction(prompt, toolNames);
+  // Do not echo the offending Antigravity tool name back into the model prompt.
+  // Repeating that name makes the same provider-native route more salient and can
+  // turn a recoverable mistake into a deterministic retry loop.
+  const corrected = appendProviderHarnessRetryInstruction(prompt, []);
   if (recoveryNumber <= 1) return corrected;
-  const names = [...new Set(toolNames)].sort().join(", ") || "unknown";
   return `${corrected}\n\n# Repeated provider transport correction
-This is safe recovery attempt ${recoveryNumber} after repeated pre-execution Antigravity permission-conversion failures involving: ${names}.
-- A previous corrected attempt still tried to invoke the inner Antigravity harness. Do not plan, coordinate, inspect, message, schedule, delegate, or manage work through Antigravity on this attempt.
-- Skip all Antigravity tool selection. Produce the enforced terminal structured object directly.
-- OMP tool requests belong only in the outer \"tool_calls\" array. A normal answer belongs only in \"text\".`;
+This is safe recovery attempt ${recoveryNumber} after another pre-execution internal-capability routing failure.
+- A corrected attempt still selected the Antigravity harness. Do not plan, coordinate, inspect, message, schedule, delegate, or manage work through Antigravity.
+- Skip internal capability selection entirely and produce the enforced terminal JSON object directly.
+- OMP host requests belong only in the outer \"tool_calls\" array using the opaque aliases supplied in the current catalog. A normal answer belongs only in \"text\".`;
 }
 
 /**
  * Classify only an exact, side-effect-free AGY missing-recipient failure.
  *
  * Provider mode forbids Antigravity messaging entirely, but the model can still
- * misroute an OMP tool name (for example `read`) through AGY `send_message`.
- * A retry is safe only when the terminal diagnostic proves that no recipient
- * existed, activity snapshots are complete, no AGY subagent ran, and every
- * non-media lifecycle event is the failed send_message targeting that exact
- * missing recipient. Exact staged-media hydration reads may coexist.
+ * misroute an OMP capability alias through AGY messaging. A retry is safe only
+ * when the terminal diagnostic proves that no recipient existed, activity
+ * snapshots are complete, no AGY subagent ran, and every non-media lifecycle
+ * event is the failed message targeting that exact nonexistent recipient.
  */
 export function retryableMissingAgyRecipient(
   error: unknown,
@@ -116,7 +117,7 @@ export function retryableMissingAgyRecipient(
   const unexpected = unexpectedProviderHarnessToolSteps(error.toolSteps, options);
   if (unexpected.length === 0) {
     // Some AGY versions emit only the terminal failure and omit the failed
-    // send_message lifecycle event. The exact nonexistent-recipient diagnostic
+    // messaging lifecycle event. The exact nonexistent-recipient diagnostic
     // proves that no message was delivered, so a corrected retry is safe.
     return missingRecipient;
   }
@@ -143,17 +144,10 @@ export function isRetryableMissingOmpRecipientError(
 
 /**
  * AGY can fail before executing a misrouted inner-harness tool while converting
- * that tool call into a permission descriptor. The CLI reports this as a
- * terminal ERROR such as:
- *
- *   declaring permissions: cortex tool manage_task: convert tool call for permissions: ...
- *
- * Every Antigravity tool is forbidden in provider mode, so the tool name itself
- * is not an allowlist decision. Recovery is safe only when the diagnostic proves
- * permission conversion failed before execution, every captured activity record
- * is complete, no subagent exists, and no non-media AGY tool lifecycle event was
- * observed. This also makes the adapter forward-compatible with new AGY control
- * tool names without weakening the no-side-effect proof.
+ * that tool call into a permission descriptor. Recovery is safe only when the
+ * diagnostic proves permission conversion failed before execution, every
+ * captured activity record is complete, no subagent exists, and no non-media
+ * AGY tool lifecycle event was observed.
  */
 export function retryablePermissionConversionTool(
   error: unknown,
@@ -178,8 +172,10 @@ export interface ProviderAttemptOptions {
   enforceToolless: boolean;
   agentName: string;
   guardOptions?: ProviderHarnessGuardOptions;
-  /** Exact OMP tool catalog for deterministic recovery of misrouted messages. */
+  /** Exact canonical OMP tool catalog for deterministic recovery of misrouted messages. */
   ompTools?: readonly SerializedTool[];
+  /** AGY-facing opaque alias -> canonical OMP name for deterministic recipient recovery. */
+  recipientAliases?: Readonly<Record<string, string>>;
 }
 
 export interface ProviderAttemptOutcome {
@@ -193,23 +189,19 @@ export interface ProviderAttemptOutcome {
  * Run AGY with tightly bounded provider-mode recovery budgets.
  *
  * Every AGY invocation passes through the same permission-conversion recovery
- * wrapper. That matters because a pre-execution inner-harness failure can happen
- * on the initial request, on a missing-recipient correction, or on a harmless
- * control-probe retry. Up to three proven side-effect-free permission failures
- * are discarded across the whole OMP turn; a fourth is surfaced rather than
- * risking an unbounded model loop.
+ * wrapper. Up to three proven side-effect-free permission failures are discarded
+ * across the whole OMP turn; a fourth is surfaced rather than risking an
+ * unbounded model loop.
  *
  * When a failed AGY send is unambiguous, prefer deterministic transport recovery
- * over another model call: messages addressed to OMP become final text, while
- * generic subagent-role messages become an OMP `task` tool call using the exact
- * current task schema.
+ * over another model call. Opaque provider aliases are restored to canonical OMP
+ * names before deterministic recovery is attempted.
  */
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
   let attempts = 0;
   let retried = false;
   let permissionRecoveries = 0;
-  const permissionTools = new Set<string>();
   const guardOptions = options.guardOptions ?? {};
 
   const invoke = async (prompt: string): Promise<AgyRunResult> => {
@@ -230,10 +222,9 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
 
         recordDiscardedUsage(error, discardedUsage);
         permissionRecoveries += 1;
-        permissionTools.add(permissionTool);
         currentPrompt = appendPermissionConversionRecovery(
           prompt,
-          [...permissionTools],
+          [permissionTool],
           permissionRecoveries,
         );
       }
@@ -242,7 +233,8 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
 
   const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
     if (options.ompTools === undefined) return undefined;
-    return synthesizeMissingRecipientRecovery(error, recipient, options.ompTools);
+    const canonicalRecipient = options.recipientAliases?.[recipient] ?? recipient;
+    return synthesizeMissingRecipientRecovery(error, canonicalRecipient, options.ompTools);
   };
 
   let result: AgyRunResult;
