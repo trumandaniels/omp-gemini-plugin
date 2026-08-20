@@ -160,3 +160,19 @@ test("direct non-tiered model uses configured slug", () => {
   );
   assert.deepEqual(selected, { model: "other-model", effort: "high" });
 });
+
+test("direct non-tiered model honors bridge defaultEffort", () => {
+  const selected = resolveAgyModelSelection(
+    {
+      id: "non-tier",
+      name: "Direct",
+      reasoning: true,
+      contextWindow: 100,
+      maxTokens: 100,
+      agyModelId: "other-model",
+    },
+    {},
+    "medium",
+  );
+  assert.deepEqual(selected, { model: "other-model", effort: "medium" });
+});
