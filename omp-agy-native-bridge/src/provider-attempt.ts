@@ -18,6 +18,10 @@ const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|â€œ([^â
 const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
 const MAX_PERMISSION_CONVERSION_RECOVERIES = 3;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizedToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -90,7 +94,7 @@ function appendPermissionConversionRecovery(
   if (recoveryNumber <= 1) return corrected;
   return `${corrected}\n\n# Repeated provider transport correction
 This is safe recovery attempt ${recoveryNumber} after another pre-execution internal-capability routing failure.
-- A corrected attempt still selected the Antigravity harness. Do not plan, coordinate, inspect, message, schedule, delegate, or manage work through Antigravity.
+- A corrected attempt still selected the Antigravity harness. Do not plan, coordinate, inspect, message, create timed work, delegate, or manage work through Antigravity.
 - Skip internal capability selection entirely and produce the enforced terminal JSON object directly.
 - OMP host requests belong only in the outer \"tool_calls\" array using the opaque aliases supplied in the current catalog. A normal answer belongs only in \"text\".`;
 }
@@ -174,7 +178,7 @@ export interface ProviderAttemptOptions {
   guardOptions?: ProviderHarnessGuardOptions;
   /** Exact canonical OMP tool catalog for deterministic recovery of misrouted messages. */
   ompTools?: readonly SerializedTool[];
-  /** AGY-facing opaque alias -> canonical OMP name for deterministic recipient recovery. */
+  /** Provider alias/canonical-name lookup used only at the deterministic recovery boundary. */
   recipientAliases?: Readonly<Record<string, string>>;
 }
 
@@ -183,6 +187,38 @@ export interface ProviderAttemptOutcome {
   /** Usage from attempts whose outputs were deliberately discarded before the final result. */
   discardedUsage: AgyUsage[];
   attempts: number;
+}
+
+function aliasSyntheticToolCalls(
+  result: AgyRunResult,
+  aliases: Readonly<Record<string, string>> | undefined,
+): AgyRunResult {
+  if (!aliases) return result;
+  const structured = result.terminal.structured_output;
+  if (!isRecord(structured) || !Array.isArray(structured.tool_calls)) return result;
+
+  const ompToWire = new Map<string, string>();
+  for (const [candidate, canonical] of Object.entries(aliases)) {
+    // Identity entries are present for final restoration. Prefer an actual opaque
+    // alias when translating a host-synthesized canonical call back onto the AGY
+    // wire contract.
+    if (candidate !== canonical && !ompToWire.has(canonical)) ompToWire.set(canonical, candidate);
+  }
+  if (ompToWire.size === 0) return result;
+
+  const toolCalls = structured.tool_calls.map((call) => {
+    if (!isRecord(call) || typeof call.name !== "string") return call;
+    const alias = ompToWire.get(call.name);
+    return alias ? { ...call, name: alias } : call;
+  });
+
+  return {
+    ...result,
+    terminal: {
+      ...result.terminal,
+      structured_output: { ...structured, tool_calls: toolCalls },
+    },
+  };
 }
 
 /**
@@ -194,8 +230,9 @@ export interface ProviderAttemptOutcome {
  * unbounded model loop.
  *
  * When a failed AGY send is unambiguous, prefer deterministic transport recovery
- * over another model call. Opaque provider aliases are restored to canonical OMP
- * names before deterministic recovery is attempted.
+ * over another model call. Provider aliases are mapped to canonical OMP names for
+ * synthesis, then host-synthesized calls are mapped back to opaque wire aliases
+ * so the provider parser has one consistent contract.
  */
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
@@ -234,7 +271,8 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
     if (options.ompTools === undefined) return undefined;
     const canonicalRecipient = options.recipientAliases?.[recipient] ?? recipient;
-    return synthesizeMissingRecipientRecovery(error, canonicalRecipient, options.ompTools);
+    const synthesized = synthesizeMissingRecipientRecovery(error, canonicalRecipient, options.ompTools);
+    return synthesized ? aliasSyntheticToolCalls(synthesized, options.recipientAliases) : undefined;
   };
 
   let result: AgyRunResult;
