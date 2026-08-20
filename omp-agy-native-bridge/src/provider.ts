@@ -22,6 +22,11 @@ import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import { unwrapNestedBridgeOutput } from "./nested-output.ts";
 import { Semaphore } from "./semaphore.ts";
 import { resolveAgyModelSelection } from "./model-selection.ts";
+import {
+  appendToolChoiceInstruction,
+  assertBridgeToolChoiceSatisfied,
+  resolveBridgeToolChoice,
+} from "./tool-choice.ts";
 import { addUsage, mapAgyUsage } from "./usage.ts";
 
 function emptyUsage(): Usage {
@@ -77,6 +82,35 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+const EMPTY_OUTPUT_ERROR = /(?:returned neither structured_output nor non-empty response text|structured_output must contain output data|structured_output must contain text or at least one tool call)/i;
+
+function mayAcceptEmptyOutput(
+  error: unknown,
+  terminal: { structured_output?: unknown; response?: string },
+): boolean {
+  if (error instanceof Error && EMPTY_OUTPUT_ERROR.test(error.message)) return true;
+  return error instanceof SyntaxError
+    && typeof terminal.structured_output === "string"
+    && terminal.structured_output.trim() === ""
+    && (typeof terminal.response !== "string" || terminal.response.trim() === "");
+}
+
+function parseProviderOutput(
+  terminal: { structured_output?: unknown; response?: string },
+  toolNames: readonly string[],
+  acceptEmpty: boolean,
+): BridgeStructuredOutput {
+  try {
+    return unwrapNestedBridgeOutput(
+      parseAgyTerminalOutput(terminal, toolNames),
+      toolNames,
+    );
+  } catch (error) {
+    if (!acceptEmpty || !mayAcceptEmptyOutput(error, terminal)) throw error;
+    return { text: "", tool_calls: [], finish_reason: "stop" };
+  }
+}
+
 export function createAgyProviderStream(
   config: BridgeConfig,
   semaphore: Semaphore,
@@ -126,8 +160,17 @@ export function createAgyProviderStream(
           });
         }
 
-        const promptResult = buildProviderPrompt(context, config, stagedImages?.attachments ?? []);
+        // OMP's toolChoice is a host-level semantic constraint. AGY has no
+        // native concept of OMP tools, so enforce it by narrowing the serialized
+        // OMP catalog and then validating the returned canonical tool calls.
+        const toolChoice = resolveBridgeToolChoice(context.tools ?? [], options?.toolChoice);
+        const promptResult = buildProviderPrompt(
+          { ...context, tools: toolChoice.tools },
+          config,
+          stagedImages?.attachments ?? [],
+        );
         const schema = buildBridgeOutputSchema(promptResult.toolNames);
+        const initialPrompt = appendToolChoiceInstruction(promptResult.prompt, toolChoice);
         const resolved = resolveAgyModelSelection(
           selected,
           {
@@ -138,7 +181,7 @@ export function createAgyProviderStream(
         );
 
         const outcome = await runProviderAttempts({
-          initialPrompt: promptResult.prompt,
+          initialPrompt,
           enforceToolless: config.rejectAgyToolUseInProviderMode,
           agentName: config.agentName,
           ompTools: promptResult.toolCatalog,
@@ -171,10 +214,12 @@ export function createAgyProviderStream(
           totalUsage = addUsage(mapAgyUsage(discarded), totalUsage);
         }
 
-        const output = unwrapNestedBridgeOutput(
-          parseAgyTerminalOutput(result.terminal, promptResult.toolNames),
+        const output = parseProviderOutput(
+          result.terminal,
           promptResult.toolNames,
+          options?.acceptEmptyResponse === true && !toolChoice.requireToolCall,
         );
+        assertBridgeToolChoiceSatisfied(output, toolChoice);
         emitText(stream, message, output.text);
         for (const call of output.tool_calls) emitToolCall(stream, message, call);
 
