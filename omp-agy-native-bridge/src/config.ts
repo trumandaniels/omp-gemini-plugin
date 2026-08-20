@@ -237,10 +237,16 @@ export function validateBridgeConfig(config: BridgeConfig): void {
     if (model.effort !== undefined && !isAgyEffort(model.effort)) {
       throw new Error(`Model ${model.id} effort must be low, medium, high, or omitted`);
     }
+    if (!model.reasoning && model.effort !== undefined) {
+      throw new Error(`Model ${model.id} cannot define effort when reasoning=false`);
+    }
     if (model.agyModelId !== undefined && (typeof model.agyModelId !== "string" || model.agyModelId.trim() === "")) {
       throw new Error(`Model ${model.id} agyModelId must be a non-empty string when supplied`);
     }
     if (model.agyModelIdsByEffort !== undefined) {
+      if (!model.reasoning) {
+        throw new Error(`Model ${model.id} cannot define agyModelIdsByEffort when reasoning=false`);
+      }
       if (!model.agyModelIdsByEffort || typeof model.agyModelIdsByEffort !== "object" || Array.isArray(model.agyModelIdsByEffort)) {
         throw new Error(`Model ${model.id} agyModelIdsByEffort must be an object when supplied`);
       }
