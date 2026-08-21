@@ -35,7 +35,7 @@ Restart OMP after installing the extension or custom Antigravity agent. For a on
 omp --extension "$PWD"
 ```
 
-Inside OMP, run `/agy-doctor`, then select `official-agy/auto` or a discovered `official-agy/<model>` entry.
+Inside OMP, open `/models`, run `/agy-doctor`, then select `official-agy/auto` or a discovered `official-agy/<model>` entry.
 
 ## Configuration
 

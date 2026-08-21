@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## `/model` does not show `official-agy`
+## `/models` does not show `official-agy`
 
 Check the extension is loaded:
 
@@ -318,7 +318,7 @@ modelRoles:
   vision: official-agy/gemini-3.7-flash
 ```
 
-Use `/model` or OMP config inspection to verify the resolved child/one-shot role and the active thinking level.
+Use `/models` or OMP config inspection to verify the resolved child/one-shot role and the active thinking level.
 
 ## Subagents appear stuck or run serially
 
