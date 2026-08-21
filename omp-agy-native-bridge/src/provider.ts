@@ -226,6 +226,9 @@ export function createAgyProviderStream(
             maxStderrBytes: config.maxStderrBytes,
             killGraceMs: config.killGraceMs,
             sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
+            providerBoundary: {
+              allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
+            },
             schema,
             signal: options?.signal,
           }),

@@ -1,14 +1,20 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 
-import { agentFilesMatch, globalAgentPath } from "./agent-install.ts";
+import {
+  agentFilesMatch,
+  globalAgentPath,
+  providerSafetyHookStatus,
+} from "./agent-install.ts";
 import { runAgy } from "./agy/runner.ts";
 import { buildAgyEnvironment } from "./env.ts";
 import {
   providerHarnessActivitySummary,
   providerHarnessSnapshotsComplete,
+  unexpectedProviderHarnessToolSteps,
 } from "./harness-guard.ts";
 import { discoverAgyModelsSync } from "./model-discovery.ts";
+import { runProviderAttempts } from "./provider-attempt.ts";
 import { buildBridgeOutputSchema, parseAgyTerminalOutput } from "./schema.ts";
 import type { BridgeModelDefinition, BridgeConfig } from "./types.ts";
 
@@ -177,7 +183,7 @@ async function captureAgents(
 export async function runDoctor(
   config: BridgeConfig,
   cwd = process.cwd(),
-  options: { live?: boolean; expectedAgentPath?: string } = {},
+  options: { live?: boolean; expectedAgentPath?: string; expectedProviderHookPath?: string } = {},
 ): Promise<DoctorReport> {
   const checks: DoctorReport["checks"] = [];
   const version = await capture(
@@ -222,6 +228,19 @@ export async function runDoctor(
     });
   }
 
+  let providerBoundaryCurrent: boolean | undefined;
+  if (options.expectedProviderHookPath) {
+    const status = await providerSafetyHookStatus(options.expectedProviderHookPath);
+    providerBoundaryCurrent = status.scriptCurrent && status.registrationCurrent;
+    checks.push({
+      name: "provider pre-tool safety boundary",
+      ok: providerBoundaryCurrent,
+      detail: providerBoundaryCurrent
+        ? `installed and registered through ${status.hooksPath}`
+        : `missing or stale (${status.scriptPath}; ${status.hooksPath}); run /agy-install-agent (or npm run install-agent -- --force), then fully restart OMP`,
+    });
+  }
+
   const agents = version.code === 0 ? await captureAgents(config, cwd) : undefined;
   const agentListed = Boolean(agents?.code === 0 && agents.names.includes(config.agentName));
   checks.push({
@@ -249,7 +268,13 @@ export async function runDoctor(
     });
   }
 
-  if (options.live && version.code === 0 && agentListed && agentCurrent !== false) {
+  if (
+    options.live
+    && version.code === 0
+    && agentListed
+    && agentCurrent !== false
+    && providerBoundaryCurrent !== false
+  ) {
     if (!models?.ok) {
       checks.push({
         name: "live provider transport",
@@ -258,28 +283,36 @@ export async function runDoctor(
       });
     } else {
       try {
-        const result = await runAgy({
-          prompt:
-            'Return exactly this structured response: {"text":"READY","tool_calls":[],"finish_reason":"stop"}. Do not use tools.',
-          cwd,
-          binary: config.agyBinary,
-          agent: config.agentName,
-          printTimeout: "2m",
-          hardTimeoutMs: 150_000,
-          sandbox: config.sandbox,
-          maxPromptBytes: config.maxPromptBytes,
-          maxStderrBytes: config.maxStderrBytes,
-          killGraceMs: config.killGraceMs,
-          sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
-          schema: buildBridgeOutputSchema([]),
+        const prompt =
+          'Return exactly this structured response: {"text":"READY","tool_calls":[],"finish_reason":"stop"}. Do not use tools.';
+        const outcome = await runProviderAttempts({
+          initialPrompt: prompt,
+          enforceToolless: true,
+          agentName: config.agentName,
+          invoke: (attemptPrompt) => runAgy({
+            prompt: attemptPrompt,
+            cwd,
+            binary: config.agyBinary,
+            agent: config.agentName,
+            printTimeout: "2m",
+            hardTimeoutMs: 150_000,
+            sandbox: config.sandbox,
+            maxPromptBytes: config.maxPromptBytes,
+            maxStderrBytes: config.maxStderrBytes,
+            killGraceMs: config.killGraceMs,
+            sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
+            providerBoundary: {},
+            schema: buildBridgeOutputSchema([]),
+          }),
         });
+        const result = outcome.result;
         const output = parseAgyTerminalOutput(result.terminal, []);
         const safeHarness = providerHarnessSnapshotsComplete(result)
-          && (result.toolStepCount ?? result.toolSteps.length) === 0
+          && unexpectedProviderHarnessToolSteps(result.toolSteps, { cwd }).length === 0
           && (result.subagentCount ?? result.subagents.length) === 0;
         checks.push({
           name: "live provider transport",
-          ok: output.text.trim() === "READY" && safeHarness,
+          ok: output.text.trim().split(/\r?\n/, 1)[0] === "READY" && safeHarness,
           detail: safeHarness
             ? `structured output=${JSON.stringify(output)}`
             : `unexpected or incompletely captured inner harness activity: ${providerHarnessActivitySummary(result)}`,

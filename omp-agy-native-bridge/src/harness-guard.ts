@@ -8,6 +8,8 @@ export type ProviderHarnessActivity = Pick<
   "toolSteps" | "subagents" | "toolStepCount" | "subagentCount"
 >;
 
+export const PROVIDER_TOOL_BLOCK_MARKER = "OMP_AGY_PROVIDER_TOOL_BLOCKED_V1";
+
 function toolStepName(event: AgyStepUpdateEvent): string {
   return event.step_update.tool_info?.name
     ?? event.step_update.tool_name
@@ -106,11 +108,20 @@ function isAllowedMediaRead(
   });
 }
 
+function wasBlockedByProviderBoundary(event: AgyStepUpdateEvent): boolean {
+  const error = event.step_update.tool_info?.error;
+  return (event.step_update.state === "DONE" || event.step_update.state === "ERROR")
+    && typeof error?.message === "string"
+    && error.message.includes(PROVIDER_TOOL_BLOCK_MARKER);
+}
+
 export function unexpectedProviderHarnessToolSteps(
   events: readonly AgyStepUpdateEvent[],
   options: ProviderHarnessGuardOptions = {},
 ): AgyStepUpdateEvent[] {
-  return uniqueAgyToolSteps(events).filter((event) => !isAllowedMediaRead(event, options));
+  return uniqueAgyToolSteps(events).filter(
+    (event) => !wasBlockedByProviderBoundary(event) && !isAllowedMediaRead(event, options),
+  );
 }
 
 function toolAction(event: AgyStepUpdateEvent): string | undefined {

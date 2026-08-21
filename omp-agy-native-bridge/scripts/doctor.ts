@@ -10,9 +10,13 @@ import { runDoctor } from "../src/doctor.ts";
 // normal provider startup.
 const config = loadBridgeConfig(process.cwd());
 const bundledAgent = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
+const bundledProviderHook = fileURLToPath(
+  new URL("../agents/omp-bridge-model/provider-safety-hook.cjs", import.meta.url),
+);
 const report = await runDoctor(config, process.cwd(), {
   live: process.argv.includes("--live"),
   expectedAgentPath: bundledAgent,
+  expectedProviderHookPath: bundledProviderHook,
 });
 console.log(report.summary);
 process.exitCode = report.ok ? 0 : 1;

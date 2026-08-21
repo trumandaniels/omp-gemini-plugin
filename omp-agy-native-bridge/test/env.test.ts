@@ -26,3 +26,13 @@ test("explicit passthrough can retain a named secret", () => {
   });
   assert.equal(output.SPECIAL_API_KEY, "allowed-by-user");
 });
+
+test("provider boundary overrides cannot be disabled by the parent environment", () => {
+  const output = buildAgyEnvironment(
+    true,
+    { OMP_AGY_PROVIDER_MODE: "0" },
+    { OMP_AGY_PROVIDER_MODE: "1", OMP_AGY_PROVIDER_MEDIA_PATHS: "[]" },
+  );
+  assert.equal(output.OMP_AGY_PROVIDER_MODE, "1");
+  assert.equal(output.OMP_AGY_PROVIDER_MEDIA_PATHS, "[]");
+});

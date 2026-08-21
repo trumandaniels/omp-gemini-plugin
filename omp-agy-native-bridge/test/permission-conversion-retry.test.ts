@@ -5,14 +5,18 @@ import test from "node:test";
 import { AgyRunError, type AgyRunErrorDetails } from "../src/agy/runner.ts";
 import {
   retryablePermissionConversionTool,
+  retryableProviderBoundaryDenial,
   runProviderAttempts,
 } from "../src/provider-attempt.ts";
+import { PROVIDER_TOOL_BLOCK_MARKER } from "../src/harness-guard.ts";
 import type { AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
 
 const SCHEDULE_DIAGNOSTIC =
   "declaring permissions: cortex tool schedule: convert tool call for permissions: model output error: invalid tool call error (invalid_args) malformed schedule request";
 const MANAGE_TASK_DIAGNOSTIC =
   "declaring permissions: cortex tool manage_task: convert tool call for permissions: model output error: invalid tool call error (invalid_args) malformed task request";
+const PROVIDER_BOUNDARY_DIAGNOSTIC =
+  `tool call denied by pre-tool hook: ${PROVIDER_TOOL_BLOCK_MARKER}: Provider mode forbids Antigravity-native actions.`;
 
 function permissionConversionError(
   diagnostic = SCHEDULE_DIAGNOSTIC,
@@ -66,6 +70,86 @@ function readFileEvent(path: string): AgyStepUpdateEvent {
     },
   };
 }
+
+test("classifies exact provider-hook denials as safe pre-execution failures", () => {
+  assert.equal(
+    retryableProviderBoundaryDenial(permissionConversionError(PROVIDER_BOUNDARY_DIAGNOSTIC)),
+    true,
+  );
+  assert.equal(
+    retryableProviderBoundaryDenial(
+      permissionConversionError(PROVIDER_BOUNDARY_DIAGNOSTIC, { toolStepCount: 1 }),
+    ),
+    false,
+  );
+  assert.equal(
+    retryableProviderBoundaryDenial(permissionConversionError("tool call denied by pre-tool hook: other hook")),
+    false,
+  );
+});
+
+test("runProviderAttempts retries an exact provider-hook denial", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "ORIGINAL",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw permissionConversionError(PROVIDER_BOUNDARY_DIAGNOSTIC);
+      return successfulResult();
+    },
+  });
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /Mandatory provider retry correction/);
+});
+
+test("provider-hook denial recovers a blocked host message after harmless control probes", async () => {
+  const manageTask: AgyStepUpdateEvent = {
+    event: "step_update",
+    step_update: {
+      step_index: 1,
+      state: "DONE",
+      step_type: "tool",
+      tool_name: "manage_task",
+      tool_info: { name: "manage_task", parameters: { Action: "list" }, output: "No tasks" },
+    },
+  };
+  const sendMessage: AgyStepUpdateEvent = {
+    event: "step_update",
+    step_update: {
+      step_index: 2,
+      state: "ERROR",
+      step_type: "tool",
+      tool_name: "send_message",
+      tool_info: {
+        name: "send_message",
+        parameters: { Recipient: "omp", Message: "Recovered provider answer" },
+        error: { type: "TOOL_ERROR", message: PROVIDER_BOUNDARY_DIAGNOSTIC },
+      },
+    },
+  };
+  const outcome = await runProviderAttempts({
+    initialPrompt: "ORIGINAL",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    ompTools: [],
+    invoke: async () => {
+      throw permissionConversionError(PROVIDER_BOUNDARY_DIAGNOSTIC, {
+        toolSteps: [manageTask, sendMessage],
+        toolStepCount: 2,
+      });
+    },
+  });
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.result.terminal.status, "SUCCESS");
+  assert.deepEqual(outcome.result.terminal.structured_output, {
+    text: "Recovered provider answer",
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
 
 test("classifies AGY schedule permission-conversion failures as retryable", () => {
   assert.equal(retryablePermissionConversionTool(permissionConversionError()), "schedule");

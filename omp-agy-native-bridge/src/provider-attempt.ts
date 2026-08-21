@@ -4,6 +4,8 @@ import {
   providerHarnessSnapshotsComplete,
   retryableProviderControlToolNames,
   unexpectedProviderHarnessToolSteps,
+  uniqueAgyToolSteps,
+  PROVIDER_TOOL_BLOCK_MARKER,
   type ProviderHarnessGuardOptions,
 } from "./harness-guard.ts";
 import { synthesizeMissingRecipientRecovery } from "./missing-recipient-recovery.ts";
@@ -17,7 +19,10 @@ import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|“([^”]+)”|‘([^’]+)’|([a-zA-Z0-9_.-]+))\s+(?:was\s+)?not\s+found\.?$/i;
 const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
 const MAX_PERMISSION_CONVERSION_RECOVERIES = 3;
-
+const PROVIDER_BOUNDARY_DENIAL = new RegExp(
+  `^tool call denied by pre-tool hook:\\s*${PROVIDER_TOOL_BLOCK_MARKER}:`,
+  "i",
+);
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -175,6 +180,49 @@ export function retryablePermissionConversionTool(
   return toolName;
 }
 
+/**
+ * The installed provider hook returns this exact marker only after denying a
+ * native AGY action before execution. A corrected retry is safe when all
+ * activity snapshots are complete and contain no other executable activity.
+ */
+export function retryableProviderBoundaryDenial(
+  error: unknown,
+  options: ProviderHarnessGuardOptions = {},
+): boolean {
+  if (!(error instanceof AgyRunError)) return false;
+  if (error.terminal?.status !== "ERROR") return false;
+  if (typeof error.terminal.error !== "string" || !PROVIDER_BOUNDARY_DENIAL.test(error.terminal.error.trim())) {
+    return false;
+  }
+  if (!providerHarnessSnapshotsComplete(error) || error.subagents.length > 0) return false;
+  const unexpected = unexpectedProviderHarnessToolSteps(error.toolSteps, options);
+  return unexpected.length === 0
+    || retryableProviderControlToolNames(unexpected, options) !== undefined;
+}
+
+function blockedProviderMessageRecipient(error: unknown): string | undefined {
+  if (!(error instanceof AgyRunError)) return undefined;
+  const recipients: string[] = [];
+  for (const event of uniqueAgyToolSteps(error.toolSteps)) {
+    if (normalizedToken(toolStepName(event)) !== "sendmessage") continue;
+    const toolError = event.step_update.tool_info?.error;
+    if (
+      event.step_update.state !== "ERROR"
+      || typeof toolError?.message !== "string"
+      || !toolError.message.includes(PROVIDER_TOOL_BLOCK_MARKER)
+    ) {
+      return undefined;
+    }
+    const eventRecipients = collectRecipients(event.step_update.tool_info?.parameters ?? {})
+      .map((recipient) => recipient.trim())
+      .filter(Boolean);
+    if (eventRecipients.length === 0) return undefined;
+    recipients.push(...eventRecipients);
+  }
+  const unique = [...new Set(recipients)];
+  return unique.length === 1 ? unique[0] : undefined;
+}
+
 export interface ProviderAttemptOptions {
   initialPrompt: string;
   invoke(prompt: string): Promise<AgyRunResult>;
@@ -259,21 +307,30 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
       } catch (error) {
         if (!options.enforceToolless) throw error;
         const permissionTool = retryablePermissionConversionTool(error, guardOptions);
-        if (!permissionTool) throw error;
+        const providerBoundaryDenied = retryableProviderBoundaryDenial(error, guardOptions);
+        if (providerBoundaryDenied) {
+          const recipient = blockedProviderMessageRecipient(error);
+          const synthesized = recipient ? deterministicRecovery(error, recipient) : undefined;
+          if (synthesized) {
+            recordDiscardedUsage(error, discardedUsage);
+            return synthesized;
+          }
+        }
+        if (!permissionTool && !providerBoundaryDenied) throw error;
         if (permissionRecoveries >= MAX_PERMISSION_CONVERSION_RECOVERIES) throw error;
 
         recordDiscardedUsage(error, discardedUsage);
         permissionRecoveries += 1;
         currentPrompt = appendPermissionConversionRecovery(
           prompt,
-          [permissionTool],
+          permissionTool ? [permissionTool] : [],
           permissionRecoveries,
         );
       }
     }
   };
 
-  const deterministicRecovery = (error: unknown, recipient: string): AgyRunResult | undefined => {
+  function deterministicRecovery(error: unknown, recipient: string): AgyRunResult | undefined {
     if (options.ompTools === undefined) return undefined;
     const canonicalRecipient = options.recipientAliases?.[recipient] ?? recipient;
     const synthesized = synthesizeMissingRecipientRecovery(
@@ -283,7 +340,7 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
       recipient,
     );
     return synthesized ? aliasSyntheticToolCalls(synthesized, options.recipientAliases) : undefined;
-  };
+  }
 
   let result: AgyRunResult;
   try {

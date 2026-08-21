@@ -59,7 +59,7 @@ Headless mode uses cached credentials and will not complete a new interactive si
 Install the exact agent definition bundled with the same bridge checkout:
 
 ```bash
-npm run install-agent -- --force
+sfw-npm run install-agent -- --force
 ```
 
 Or, from inside OMP:
@@ -74,18 +74,26 @@ Expected path:
 ~/.gemini/config/agents/omp-bridge-model/agent.md
 ```
 
+The same command installs a provider-only `PreToolUse` boundary and registers its managed hook:
+
+```text
+~/.gemini/config/omp-agy-native-bridge/provider-safety-hook.cjs
+~/.gemini/config/hooks.json
+```
+
 Verify discovery and exact-file freshness:
 
 ```bash
 agy agents
-npm run doctor
+sfw-npm run doctor
 ```
 
-`doctor` should report both of these as `PASS`:
+`doctor` should report all three of these as `PASS`:
 
 ```text
 tool-less bridge agent file
 tool-less bridge agent contents
+provider pre-tool safety boundary
 ```
 
 Fully exit every OMP and `agy` process after replacing the agent, then start a new OMP process. Custom-agent definitions and provider metadata are loaded at process startup.
@@ -111,14 +119,16 @@ plugins: []
 rules: []
 ```
 
+AGY 1.1.13 and later may still expose fundamental control tools such as `manage_task` to declarative primary agents. Prompt instructions and `tools: []` are not an execution boundary. The installed `PreToolUse` hook allows only side-effect-free status probes and exact staged-image reads during provider processes; it denies messaging, mutation, execution, delegation, and other Antigravity-native actions before execution. It remains inert for normal AGY and `agy_delegate` runs. When AGY misroutes an answer through blocked internal messaging, the bridge deterministically reconstructs the intended OMP return instead of trusting an executed message.
+
 Repair from the repository root:
 
 ```bash
 git switch main
 git pull
 cd omp-agy-native-bridge
-npm run install-agent -- --force
-npm run doctor:live
+sfw-npm run install-agent -- --force
+sfw-npm run doctor:live
 ```
 
 If the plugin was installed from this checkout rather than linked, reinstall it too:
@@ -127,7 +137,7 @@ If the plugin was installed from this checkout rather than linked, reinstall it 
 omp plugin install "$PWD"
 ```
 
-Then fully terminate and restart OMP. Merely dismissing the message or starting a new turn does not reload the custom-agent definition.
+Then fully terminate and restart OMP. Merely dismissing the message or starting a new turn does not reload the custom-agent definition or hook configuration.
 
 The improved error reports unique tool invocation names and distinguishes them from repeated `ACTIVE`/`DONE` lifecycle updates. If the failure remains after a clean reinstall and restart, copy the complete new error. A message such as:
 

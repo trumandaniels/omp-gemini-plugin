@@ -137,6 +137,10 @@ export interface AgyRunOptions {
   maxStderrBytes: number;
   killGraceMs: number;
   sanitizeAccountEnvironment: boolean;
+  /** Enables the installed pre-tool safety boundary for a provider-mode process only. */
+  providerBoundary?: {
+    allowedMediaPaths?: readonly string[];
+  };
   schema?: Record<string, unknown>;
   conversationId?: string;
   signal?: AbortSignal;

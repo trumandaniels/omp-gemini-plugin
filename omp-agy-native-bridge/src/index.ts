@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import type { Api } from "@oh-my-pi/pi-ai";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
-import { installAgentFile } from "./agent-install.ts";
+import { installAgentFile, installProviderSafetyHook } from "./agent-install.ts";
 import { loadBridgeConfig } from "./config.ts";
 import { discoverAgyModelsSync, mergeDiscoveredModels } from "./model-discovery.ts";
 import { registerAgyDelegateTool } from "./delegate-tool.ts";
@@ -30,6 +30,9 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
   );
   const streamSimple = createAgyProviderStream(config, semaphore, process.cwd());
   const bundledAgent = fileURLToPath(new URL("../agents/omp-bridge-model/agent.md", import.meta.url));
+  const bundledProviderHook = fileURLToPath(
+    new URL("../agents/omp-bridge-model/provider-safety-hook.cjs", import.meta.url),
+  );
 
   if (config.enableDelegateTool) {
     registerAgyDelegateTool(pi, config, semaphore);
@@ -38,7 +41,10 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
   pi.registerCommand("agy-doctor", {
     description: "Check the official agy binary, model list, and bridge custom agent.",
     handler: async (_args, ctx) => {
-      const report = await runDoctor(config, ctx.cwd, { expectedAgentPath: bundledAgent });
+      const report = await runDoctor(config, ctx.cwd, {
+        expectedAgentPath: bundledAgent,
+        expectedProviderHookPath: bundledProviderHook,
+      });
       ctx.ui.notify(report.summary, report.ok ? "info" : "error");
     },
   });
@@ -48,11 +54,15 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const confirmed = await ctx.ui.confirm(
         "Install Antigravity bridge agent",
-        `Write ${config.agentName} into ~/.gemini/config/agents? Existing contents will be replaced after confirmation.`,
+        `Write ${config.agentName} and its provider-only safety hook into ~/.gemini/config? Managed entries will be replaced after confirmation.`,
       );
       if (!confirmed) return;
       const destination = await installAgentFile(bundledAgent, config.agentName, true);
-      ctx.ui.notify(`Installed ${destination}. Restart agy/OMP before provider use.`, "info");
+      const hook = await installProviderSafetyHook(bundledProviderHook, true);
+      ctx.ui.notify(
+        `Installed ${destination} and provider safety hook ${hook.scriptPath}. Restart agy/OMP before provider use.`,
+        "info",
+      );
     },
   });
 

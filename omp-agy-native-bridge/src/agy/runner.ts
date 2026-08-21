@@ -162,9 +162,16 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     if (options.sandbox) args.push("--sandbox");
     args.push("--print-timeout", options.printTimeout);
 
+    const providerEnvironment = options.providerBoundary
+      ? {
+          OMP_AGY_PROVIDER_MODE: "1",
+          OMP_AGY_PROVIDER_MEDIA_PATHS: JSON.stringify(options.providerBoundary.allowedMediaPaths ?? []),
+        }
+      : {};
+
     const child = spawn(options.binary, args, {
       cwd: options.cwd,
-      env: buildAgyEnvironment(options.sanitizeAccountEnvironment),
+      env: buildAgyEnvironment(options.sanitizeAccountEnvironment, process.env, providerEnvironment),
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
       shell: false,

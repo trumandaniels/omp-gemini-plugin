@@ -23,6 +23,7 @@ function passthroughNames(env: NodeJS.ProcessEnv): Set<string> {
 export function buildAgyEnvironment(
   sanitize: boolean,
   baseEnv: NodeJS.ProcessEnv = process.env,
+  overrides: NodeJS.ProcessEnv = {},
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   const passthrough = passthroughNames(baseEnv);
@@ -37,6 +38,7 @@ export function buildAgyEnvironment(
     }
     env[name] = value;
   }
+  Object.assign(env, overrides);
   env.NO_COLOR = "1";
   env.FORCE_COLOR = "0";
   return env;

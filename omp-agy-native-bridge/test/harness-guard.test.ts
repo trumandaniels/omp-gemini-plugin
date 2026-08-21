@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   assertProviderHarnessIsToolless,
+  PROVIDER_TOOL_BLOCK_MARKER,
   providerHarnessActivitySummary,
   providerHarnessSnapshotsComplete,
   retryableProviderControlToolNames,
@@ -59,6 +60,33 @@ test("provider guard puts the exact AGY control tool before the long diagnostic"
         "omp-bridge-model",
       ),
     /^Error: Forbidden AGY provider tool\(s\): manage_subagents\./,
+  );
+});
+
+test("provider guard accepts AGY tools proven blocked before execution", () => {
+  const active = toolEvent("ACTIVE", 8, "send_message", { Recipient: "omp", Message: "continue" });
+  const blocked = toolEvent("ERROR", 8, "send_message", { Recipient: "omp", Message: "continue" });
+  blocked.step_update.tool_info!.error = {
+    type: "permission_denied",
+    message: `${PROVIDER_TOOL_BLOCK_MARKER}: provider boundary denied the call`,
+  };
+  assert.equal(unexpectedProviderHarnessToolSteps([active, blocked]).length, 0);
+  assert.doesNotThrow(() =>
+    assertProviderHarnessIsToolless(
+      { toolSteps: [active, blocked], subagents: [] },
+      "omp-bridge-model",
+    ));
+});
+
+test("provider guard rejects a marker on an incomplete ACTIVE lifecycle", () => {
+  const active = toolEvent("ACTIVE", 9, "send_message", { Recipient: "omp", Message: "continue" });
+  active.step_update.tool_info!.error = {
+    type: "permission_denied",
+    message: `${PROVIDER_TOOL_BLOCK_MARKER}: untrusted incomplete event`,
+  };
+  assert.throws(
+    () => assertProviderHarnessIsToolless({ toolSteps: [active], subagents: [] }, "omp-bridge-model"),
+    /Forbidden AGY provider tool/,
   );
 });
 
