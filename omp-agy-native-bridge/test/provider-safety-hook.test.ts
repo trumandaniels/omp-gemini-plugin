@@ -22,10 +22,9 @@ function hookInput(name: string, args: Record<string, unknown>): Record<string, 
 test("provider hook is inert outside bridge provider processes", () => {
   assert.deepEqual(decide(hookInput("send_message", {}), {}), { decision: "allow" });
 });
-test("provider hook allows only side-effect-free control probes", () => {
+test("provider hook allows only enumeration control probes", () => {
   for (const [name, args] of [
     ["manage_task", { Action: "list" }],
-    ["manage_task", { Action: "status", TaskId: "task-1" }],
     ["manage_subagents", { Action: "list" }],
   ] as const) {
     assert.deepEqual(decide(hookInput(name, args), { OMP_AGY_PROVIDER_MODE: "1" }), { decision: "allow" });
@@ -34,6 +33,7 @@ test("provider hook allows only side-effect-free control probes", () => {
     ["send_message", { Recipient: "omp", Message: "continue" }],
     ["manage_task", { Action: "kill", TaskId: "task-1" }],
     ["manage_task", { Action: "send_input", TaskId: "task-1", Input: "continue" }],
+    ["manage_task", { Action: "status", TaskId: "task-1" }],
     ["schedule", { DurationSeconds: 30, Prompt: "continue" }],
     ["define_subagent", { name: "worker" }],
     ["invoke_subagent", {}],

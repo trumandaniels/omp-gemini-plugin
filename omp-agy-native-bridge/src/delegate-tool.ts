@@ -17,10 +17,18 @@ interface DelegateParams {
 const INVALID_TASK_ID_FAILURE = /^invalid task ID format:\s*"([^"\r\n]+)"\.?$/i;
 const DELEGATE_TASK_ID_INSTRUCTION = `# Antigravity task-ID safety
 If you use manage_task, first list the current tasks and pass only exact TaskId values returned by manage_task in this conversation. Never invent a task ID or use a placeholder such as "dummy".`;
+const MAX_INVALID_TASK_ID_RECOVERIES = 3;
+const RECOVERY_COMPLETION_PROMPT = `# Complete the delegated task now
+A prior task-ID recovery turn may have returned only a progress or status update.
+- Do not call manage_task.
+- Finish the original delegated task directly from the current conversation state.
+- Return the complete requested result, not a status update or plan.`;
 
 interface DelegateRunOutcome {
   result: AgyRunResult;
   recoveredInvalidTaskId?: string;
+  invalidTaskIdRecoveries: number;
+  recoveryCompletionTurns: number;
 }
 
 function invalidTaskIdRecovery(
@@ -41,37 +49,55 @@ function taskIdRecoveryPrompt(invalidTaskId: string): string {
   return `# Mandatory task-ID correction
 The previous manage_task call was rejected because ${JSON.stringify(invalidTaskId)} is not a real task ID.
 - Continue from the current conversation state; do not replay work already completed.
-- Call manage_task with Action "list" before any status, kill, or send_input action.
-- Use only an exact TaskId returned by that list. Never invent or substitute a placeholder task ID.`;
+- Do not call manage_task again in this run. The prior call proved that you do not have a valid task ID.
+- Complete the delegated task directly with the conversation context and other available capabilities.`;
 }
 
 /**
- * Run one delegated AGY conversation. A model-generated placeholder task ID can
+ * Run one delegated AGY conversation. Model-generated placeholder task IDs can
  * terminate AGY before it can self-correct, so resume that exact conversation
- * once with an explicit correction. Never replay the original delegated task.
+ * with a direct-work correction. Never replay the original delegated task.
  */
 export async function runAgyDelegate(
   options: AgyRunOptions,
   invoke: (runOptions: AgyRunOptions) => Promise<AgyRunResult> = runAgy,
 ): Promise<DelegateRunOutcome> {
-  try {
-    return {
-      result: await invoke({
-        ...options,
-        prompt: `${options.prompt}\n\n${DELEGATE_TASK_ID_INSTRUCTION}`,
-      }),
-    };
-  } catch (error) {
-    const recovery = invalidTaskIdRecovery(error);
-    if (!recovery) throw error;
-    return {
-      result: await invoke({
+  let runOptions: AgyRunOptions = {
+    ...options,
+    prompt: `${options.prompt}\n\n${DELEGATE_TASK_ID_INSTRUCTION}`,
+  };
+  let recoveredInvalidTaskId: string | undefined;
+  let invalidTaskIdRecoveries = 0;
+  let recoveryCompletionTurns = 0;
+
+  while (true) {
+    try {
+      const result = await invoke(runOptions);
+      if (recoveredInvalidTaskId && recoveryCompletionTurns === 0) {
+        const conversationId = result.terminal.conversation_id?.trim() || runOptions.conversationId;
+        if (conversationId) {
+          recoveryCompletionTurns = 1;
+          runOptions = {
+            ...options,
+            prompt: RECOVERY_COMPLETION_PROMPT,
+            conversationId,
+          };
+          continue;
+        }
+      }
+      return { result, recoveredInvalidTaskId, invalidTaskIdRecoveries, recoveryCompletionTurns };
+    } catch (error) {
+      const recovery = invalidTaskIdRecovery(error);
+      if (!recovery || invalidTaskIdRecoveries >= MAX_INVALID_TASK_ID_RECOVERIES) throw error;
+
+      recoveredInvalidTaskId ??= recovery.invalidTaskId;
+      invalidTaskIdRecoveries += 1;
+      runOptions = {
         ...options,
         prompt: taskIdRecoveryPrompt(recovery.invalidTaskId),
         conversationId: recovery.conversationId,
-      }),
-      recoveredInvalidTaskId: recovery.invalidTaskId,
-    };
+      };
+    }
   }
 }
 
@@ -142,12 +168,14 @@ export function registerAgyDelegateTool(
             usage: result.terminal.usage,
             tools: summary.tools,
             recoveredInvalidTaskId: outcome.recoveredInvalidTaskId,
+            invalidTaskIdRecoveries: outcome.invalidTaskIdRecoveries,
             subagents: summary.subagents,
             progress: {
               ...summary.progress,
               observedToolLifecycleUpdates: result.toolStepCount ?? result.toolSteps.length,
               observedSubagentUpdates: result.subagentCount ?? result.subagents.length,
             },
+            recoveryCompletionTurns: outcome.recoveryCompletionTurns,
             stderr: result.stderr || undefined,
           },
         };
