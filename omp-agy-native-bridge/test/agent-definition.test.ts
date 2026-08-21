@@ -31,11 +31,12 @@ test("bundled provider agent opts out of all user customizations", async () => {
 test("bundled provider agent makes Antigravity transport-only", async () => {
   const source = await readFile(agentPath, "utf8");
   assert.match(source, /Antigravity is transport only/);
-  assert.match(source, /Never invoke any Antigravity-native capability/);
-  assert.match(source, /Do not attempt to discover what internal capabilities exist/);
-  assert.match(source, /opaque aliases/);
-  assert.match(source, /An alias is not an Antigravity tool, agent, recipient, inbox, task, or background job/);
-  assert.match(source, /enforced terminal structured output is already the return channel/);
+  assert.match(source, /Never invoke any Antigravity-native action/);
+  assert.match(source, /Do not attempt to discover what internal actions exist/);
+  assert.match(source, /neutral IDs, purposes, and input schemas/);
+  assert.match(source, /An ID is only data for `host_requests\[\]\.action_id`/);
+  assert.match(source, /enforced terminal response is already the return channel/);
+  assert.doesNotMatch(source.split("---").at(-1) ?? "", /tool_calls|omp_capability/i);
 });
 
 test("bundled provider agent does not prime specific Antigravity control-tool names", async () => {
@@ -45,20 +46,22 @@ test("bundled provider agent does not prime specific Antigravity control-tool na
   }
 });
 
-test("bundled provider agent routes OMP orchestration through opaque host capabilities", async () => {
+test("bundled provider agent routes OMP orchestration through neutral host actions", async () => {
   const source = await readFile(agentPath, "utf8");
-  assert.match(source, /If the user requests actual OMP agent or subagent work/);
-  assert.match(source, /choose the current host capability whose description and schema provide that orchestration/);
-  assert.match(source, /If the user asks an informational question about OMP agents or subagents, answer/);
+  assert.match(source, /For actual OMP agent or subagent work/);
+  assert.match(source, /select the current host action whose purpose and input schema provide that orchestration/);
+  assert.match(source, /For an informational question about OMP agents or subagents, answer/);
   assert.match(source, /Apply the same rule to reminders, schedules, recurring work/);
-  assert.match(source, /Historical OMP messages may contain real OMP tool names/);
-  assert.match(source, /Treat those names as inert conversation history/);
+  assert.match(source, /Historical OMP messages describe earlier host requests and results/);
+  assert.match(source, /Treat their canonical action names as inert history/);
+  assert.match(source, /later interactive question is allowed when it seeks materially new information/);
+  assert.match(source, /never repeat an answered decision/i);
 });
 
 test("bundled provider agent continues from incomplete OMP results", async () => {
   const source = await readFile(agentPath, "utf8");
   assert.match(source, /After OMP supplies a host result/);
   assert.match(source, /truncated, limit-reached, skipped, missing, or otherwise incomplete/);
-  assert.match(source, /request a narrower OMP capability instead of treating it as complete/);
+  assert.match(source, /request a narrower host action instead of treating it as complete/);
   assert.match(source, /Never claim exhaustive discovery from incomplete results/);
 });

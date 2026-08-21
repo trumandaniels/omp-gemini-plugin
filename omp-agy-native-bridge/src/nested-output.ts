@@ -6,15 +6,14 @@ const MAX_NESTED_BRIDGE_DEPTH = 4;
 /**
  * Nested-output recovery is intentionally more conservative than the top-level
  * structured-output parser. Plain JSON is valid user-visible content, so only
- * unwrap text that actually carries bridge protocol keys. This preserves exact
- * JSON answers instead of reformatting arbitrary objects while still recovering
- * the known serialized tool/finish envelopes emitted by AGY wrappers.
+ * unwrap text that carries host-response protocol keys. This preserves exact
+ * JSON answers while recovering a serialized response emitted by AGY wrappers.
  */
 function looksLikeSerializedBridgeOutput(value: string): boolean {
   const trimmed = value.trimStart();
   const startsLikeJson = trimmed.startsWith("{") || /^(?:```|~~~)(?:json)?(?:\s|$)/i.test(trimmed);
   if (!startsLikeJson) return false;
-  return /"(?:tool_calls|finish_reason)"\s*:/.test(trimmed);
+  return /"(?:host_requests|response)"\s*:/.test(trimmed);
 }
 
 function sameBridgeOutput(left: BridgeStructuredOutput, right: BridgeStructuredOutput): boolean {
@@ -24,9 +23,8 @@ function sameBridgeOutput(left: BridgeStructuredOutput, right: BridgeStructuredO
 }
 
 /**
- * Recover when AGY satisfies the outer JSON schema but serializes another bridge
- * response inside `text`. This commonly appears as a fenced tool-call object plus
- * one or more duplicated completion objects.
+ * Recover when AGY satisfies the outer JSON schema but serializes another host
+ * response inside `response`.
  */
 export function unwrapNestedBridgeOutput(
   output: BridgeStructuredOutput,
@@ -42,8 +40,8 @@ export function unwrapNestedBridgeOutput(
     try {
       nested = parseAgyTerminalOutput({ response: current.text }, allowedToolNames);
     } catch {
-      // JSON-only user answers and invalid/unavailable nested tool calls remain
-      // ordinary text. In particular, never execute an unvalidated nested call.
+      // JSON-only user answers and invalid nested host requests remain ordinary
+      // text. Never execute an unvalidated nested request.
       return current;
     }
 

@@ -1,28 +1,58 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildBridgeOutputSchema, parseBridgeStructuredOutput } from "../src/schema.ts";
+import { buildBridgeOutputSchema, parseBridgeStructuredOutput, parseHostResponseOutput } from "../src/schema.ts";
 
-test("outer schema leaves non-semantic envelope representation to the adapter", () => {
-  const schema = buildBridgeOutputSchema(["read"]) as {
+test("outer schema uses only neutral host-response fields", () => {
+  const schema = buildBridgeOutputSchema(["host_action_01"]) as {
     required?: string[];
     additionalProperties?: boolean;
     properties: {
-      text: Record<string, unknown>;
-      tool_calls: { items: { required?: string[]; properties: Record<string, unknown> } };
+      response: Record<string, unknown>;
+      host_requests: { items: { required?: string[]; properties: Record<string, unknown> } };
     };
   };
 
   assert.equal(schema.required, undefined);
   assert.equal(schema.additionalProperties, true);
-  assert.deepEqual(schema.properties.text, {});
-  assert.deepEqual(schema.properties.tool_calls.items.properties.id, {});
-  assert.deepEqual(schema.properties.tool_calls.items.properties.arguments, {});
-  assert.deepEqual(schema.properties.tool_calls.items.required, ["name"]);
-  assert.deepEqual(schema.properties.tool_calls.items.properties.name, {
+  assert.deepEqual(schema.properties.response, {});
+  assert.deepEqual(schema.properties.host_requests.items.properties.request_id, {});
+  assert.deepEqual(schema.properties.host_requests.items.properties.input, {});
+  assert.deepEqual(schema.properties.host_requests.items.required, ["action_id"]);
+  assert.deepEqual(schema.properties.host_requests.items.properties.action_id, {
     type: "string",
-    enum: ["read"],
+    enum: ["host_action_01"],
   });
+  assert.doesNotMatch(JSON.stringify(schema), /tool_calls|finish_reason|arguments/);
+});
+
+test("host requests normalize into the internal OMP call representation", () => {
+  assert.deepEqual(
+    parseHostResponseOutput(
+      {
+        response: "",
+        host_requests: [
+          {
+            request_id: 17,
+            action_id: "host_action_01",
+            input: '{"path":"README.md","offset":1}',
+          },
+        ],
+      },
+      ["host_action_01"],
+    ),
+    {
+      text: "",
+      tool_calls: [
+        {
+          id: "17",
+          name: "host_action_01",
+          arguments: { path: "README.md", offset: 1 },
+        },
+      ],
+      finish_reason: "tool_use",
+    },
+  );
 });
 
 test("JSON-encoded tool arguments are normalized before OMP dispatch", () => {

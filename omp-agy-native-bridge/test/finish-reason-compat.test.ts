@@ -7,14 +7,17 @@ import {
   parseBridgeStructuredOutput,
 } from "../src/schema.ts";
 
-test("finish_reason and empty envelope fields are compatibility metadata", () => {
-  const schema = buildBridgeOutputSchema(["read"]) as {
+test("host response schema omits internal completion metadata", () => {
+  const schema = buildBridgeOutputSchema(["host_action_01"]) as {
     required?: string[];
     properties?: Record<string, unknown>;
   };
 
   assert.equal(schema.required, undefined);
-  assert.ok(schema.properties?.finish_reason);
+  assert.ok(schema.properties?.response);
+  assert.ok(schema.properties?.host_requests);
+  assert.equal(schema.properties?.finish_reason, undefined);
+  assert.equal(schema.properties?.tool_calls, undefined);
 });
 
 test("parser derives tool_use when finish_reason and text are missing", () => {

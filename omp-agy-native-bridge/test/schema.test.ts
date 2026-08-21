@@ -49,9 +49,8 @@ test("parseAgyTerminalOutput validates structured_output object", () => {
   const parsed = parseAgyTerminalOutput(
     {
       structured_output: {
-        text: "ok",
-        tool_calls: [],
-        finish_reason: "stop",
+        response: "ok",
+        host_requests: [],
       },
       response: "ignored",
     },
@@ -67,7 +66,7 @@ test("parseAgyTerminalOutput validates structured_output object", () => {
 test("parseAgyTerminalOutput parses JSON string in structured_output", () => {
   const parsed = parseAgyTerminalOutput(
     {
-      structured_output: '{"text":"ok","tool_calls":[],"finish_reason":"stop"}',
+      structured_output: '{"response":"ok","host_requests":[]}',
       response: "ignored",
     },
     ["read"],
@@ -78,7 +77,7 @@ test("parseAgyTerminalOutput parses JSON string in structured_output", () => {
 test("parseAgyTerminalOutput parses JSON response when structured_output is absent", () => {
   const parsed = parseAgyTerminalOutput(
     {
-      response: '{"text":"from response","tool_calls":[],"finish_reason":"stop"}',
+      response: '{"response":"from response","host_requests":[]}',
     },
     ["read"],
   );
@@ -88,26 +87,10 @@ test("parseAgyTerminalOutput parses JSON response when structured_output is abse
 
 test("parseAgyTerminalOutput keeps the first result when agy concatenates completion objects", () => {
   const response = [
-    {
-      text: "Test acknowledged. Ready for instructions.",
-      tool_calls: [],
-      finish_reason: "stop",
-    },
-    {
-      text: "Task complete. Ready for next instructions.",
-      tool_calls: [],
-      finish_reason: "stop",
-    },
-    {
-      text: "Task complete.",
-      tool_calls: [],
-      finish_reason: "stop",
-    },
-    {
-      text: "Completed.",
-      tool_calls: [],
-      finish_reason: "stop",
-    },
+    { response: "Test acknowledged. Ready for instructions.", host_requests: [] },
+    { response: "Task complete. Ready for next instructions.", host_requests: [] },
+    { response: "Task complete.", host_requests: [] },
+    { response: "Completed.", host_requests: [] },
   ].map((value) => JSON.stringify(value)).join("\n");
 
   assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
@@ -117,25 +100,23 @@ test("parseAgyTerminalOutput keeps the first result when agy concatenates comple
   });
 });
 
-test("parseAgyTerminalOutput preserves a first tool call before concatenated completion chatter", () => {
+test("parseAgyTerminalOutput preserves a first host request before concatenated completion chatter", () => {
   const response = [
     {
-      text: 'Read the "{draft}" file.',
-      tool_calls: [
+      response: 'Read the "{draft}" file.',
+      host_requests: [
         {
-          name: "read",
-          arguments: {
+          action_id: "read",
+          input: {
             path: "notes/{draft}.md",
             selection: { lines: [1, 2] },
           },
         },
       ],
-      finish_reason: "tool_use",
     },
     {
-      text: "Completed.",
-      tool_calls: [],
-      finish_reason: "stop",
+      response: "Completed.",
+      host_requests: [],
     },
   ].map((value) => JSON.stringify(value)).join("\n\n");
 
@@ -156,16 +137,14 @@ test("parseAgyTerminalOutput preserves a first tool call before concatenated com
 
 test("parseAgyTerminalOutput keeps the first result when later chatter is truncated", () => {
   const first = JSON.stringify({
-    text: "Long answer with {braces}, [arrays], and markdown.",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "Long answer with {braces}, [arrays], and markdown.",
+    host_requests: [],
   });
   const completeChatter = JSON.stringify({
-    text: "Task complete.",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "Task complete.",
+    host_requests: [],
   });
-  const response = `${first}\n${completeChatter}\n{"text":"truncated`;
+  const response = `${first}\n${completeChatter}\n{"response":"truncated`;
 
   assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
     text: "Long answer with {braces}, [arrays], and markdown.",
@@ -176,14 +155,12 @@ test("parseAgyTerminalOutput keeps the first result when later chatter is trunca
 
 test("parseAgyTerminalOutput handles separately fenced completion objects", () => {
   const first = JSON.stringify({
-    text: "First fenced result.",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "First fenced result.",
+    host_requests: [],
   });
   const chatter = JSON.stringify({
-    text: "Completed.",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "Completed.",
+    host_requests: [],
   });
   const response = `\`\`\`json\n${first}\n\`\`\`\n\`\`\`json\n${chatter}\n\`\`\``;
 
@@ -197,14 +174,12 @@ test("parseAgyTerminalOutput handles separately fenced completion objects", () =
 test("parseAgyTerminalOutput handles concatenated structured_output strings", () => {
   const structuredOutput = [
     {
-      text: "Structured first result.",
-      tool_calls: [],
-      finish_reason: "stop",
+      response: "Structured first result.",
+      host_requests: [],
     },
     {
-      text: "Completed.",
-      tool_calls: [],
-      finish_reason: "stop",
+      response: "Completed.",
+      host_requests: [],
     },
   ].map((value) => JSON.stringify(value)).join("\n");
 
@@ -218,7 +193,7 @@ test("parseAgyTerminalOutput handles concatenated structured_output strings", ()
 test("parseAgyTerminalOutput unwraps fenced JSON in response", () => {
   const parsed = parseAgyTerminalOutput(
     {
-      response: "```json\n{\"text\":\"json\",\"tool_calls\":[],\"finish_reason\":\"stop\"}\n```",
+      response: "```json\n{\"response\":\"json\",\"host_requests\":[]}\n```",
     },
     ["read"],
   );
@@ -240,7 +215,7 @@ test("parseAgyTerminalOutput falls back to plain text response", () => {
 });
 
 test("parseAgyTerminalOutput does not swallow prose around a JSON object", () => {
-  const response = 'prefix\n{"text":"json","tool_calls":[],"finish_reason":"stop"}\nsuffix';
+  const response = 'prefix\n{"response":"json","host_requests":[]}\nsuffix';
   assert.deepEqual(parseAgyTerminalOutput({ response }, []), {
     text: response,
     tool_calls: [],
@@ -252,7 +227,7 @@ test("parseAgyTerminalOutput falls through when structured_output is null", () =
   const parsed = parseAgyTerminalOutput(
     {
       structured_output: null,
-      response: '{"text":"null handled","tool_calls":[],"finish_reason":"stop"}',
+      response: '{"response":"null handled","host_requests":[]}',
     },
     [],
   );
@@ -264,7 +239,7 @@ test("parseAgyTerminalOutput recovers malformed serialized structured_output fro
     parseAgyTerminalOutput(
       {
         structured_output: "not-json",
-        response: '{"text":"fallback","tool_calls":[],"finish_reason":"stop"}',
+        response: '{"response":"fallback","host_requests":[]}',
       },
       ["read"],
     ),
@@ -276,7 +251,7 @@ test("parseAgyTerminalOutput normalizes scalar text values", () => {
   assert.deepEqual(
     parseAgyTerminalOutput(
       {
-        response: '{"text":1,"tool_calls":[],"finish_reason":"stop"}',
+        response: '{"response":1,"host_requests":[]}',
       },
       [],
     ),
@@ -285,16 +260,16 @@ test("parseAgyTerminalOutput normalizes scalar text values", () => {
   assert.equal(parseBridgeStructuredOutput({ text: false }, []).text, "false");
 });
 
-test("parseAgyTerminalOutput rejects unknown tools in response JSON", () => {
+test("parseAgyTerminalOutput rejects unknown host actions in response JSON", () => {
   assert.throws(
     () =>
       parseAgyTerminalOutput(
         {
-          response: '{"text":"tool?","tool_calls":[{"name":"fake","arguments":{}}],"finish_reason":"tool_use"}',
+          response: '{"response":"action?","host_requests":[{"action_id":"fake","input":{}}]}',
         },
         ["read", "write"],
       ),
-    /unavailable OMP tool/,
+    /unavailable host action/,
   );
 });
 

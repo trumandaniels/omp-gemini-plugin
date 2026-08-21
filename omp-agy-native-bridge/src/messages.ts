@@ -57,10 +57,10 @@ function normalizeContent(
         return { type: "reasoning_omitted" };
       case "toolCall":
         return {
-          type: "tool_call",
-          id: String(item.id ?? ""),
-          name: String(item.name ?? ""),
-          arguments: jsonSafe(item.arguments ?? {}),
+          type: "host_request_history",
+          requestId: String(item.id ?? ""),
+          actionName: String(item.name ?? ""),
+          input: jsonSafe(item.arguments ?? {}),
         };
       case "serverToolUse":
         return { type: "server_tool_omitted", name: String(item.name ?? "") };
@@ -84,10 +84,10 @@ function normalizeMessage(
   const role = String(item.role ?? "unknown");
   if (role === "toolResult") {
     return {
-      role: "tool_result",
-      toolCallId: String(item.toolCallId ?? ""),
-      toolName: String(item.toolName ?? "unknown"),
-      isError: Boolean(item.isError),
+      role: "host_result",
+      requestId: String(item.toolCallId ?? ""),
+      actionName: String(item.toolName ?? "unknown"),
+      failed: Boolean(item.isError),
       content: normalizeContent(item.content, messageIndex, images),
     };
   }

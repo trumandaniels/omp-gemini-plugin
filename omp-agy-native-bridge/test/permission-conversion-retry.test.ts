@@ -4,8 +4,10 @@ import test from "node:test";
 
 import { AgyRunError, type AgyRunErrorDetails } from "../src/agy/runner.ts";
 import {
+  retryableInvalidTaskId,
   retryablePermissionConversionTool,
   retryableProviderBoundaryDenial,
+  retryableUnknownProviderCapability,
   runProviderAttempts,
 } from "../src/provider-attempt.ts";
 import { PROVIDER_TOOL_BLOCK_MARKER } from "../src/harness-guard.ts";
@@ -22,6 +24,48 @@ function permissionConversionError(
   diagnostic = SCHEDULE_DIAGNOSTIC,
   overrides: Partial<AgyRunErrorDetails> = {},
 ): AgyRunError {
+  return new AgyRunError(`agy failed: ${diagnostic}`, {
+    exitCode: 0,
+    status: "ERROR",
+    terminal: {
+      status: "ERROR",
+      error: diagnostic,
+      usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 },
+    },
+    toolSteps: [],
+    subagents: [],
+    toolStepCount: 0,
+    subagentCount: 0,
+    ...overrides,
+  });
+}
+
+function invalidTaskIdError(
+  taskId = "none",
+  overrides: Partial<AgyRunErrorDetails> = {},
+): AgyRunError {
+  const diagnostic = `invalid task ID format: "${taskId}"`;
+  return new AgyRunError(`agy failed: ${diagnostic}`, {
+    exitCode: 0,
+    status: "ERROR",
+    terminal: {
+      status: "ERROR",
+      error: diagnostic,
+      usage: { input_tokens: 5, output_tokens: 1, total_tokens: 6 },
+    },
+    toolSteps: [],
+    subagents: [],
+    toolStepCount: 0,
+    subagentCount: 0,
+    ...overrides,
+  });
+}
+
+function unknownToolError(
+  toolName = "host_action_02",
+  overrides: Partial<AgyRunErrorDetails> = {},
+): AgyRunError {
+  const diagnostic = `unknown tool: "${toolName}" - check spelling`;
   return new AgyRunError(`agy failed: ${diagnostic}`, {
     exitCode: 0,
     status: "ERROR",
@@ -70,6 +114,37 @@ function readFileEvent(path: string): AgyStepUpdateEvent {
     },
   };
 }
+
+test("classifies unknown current-turn action IDs as safe pre-execution failures", () => {
+  const aliases = { host_action_02: "ask", ask: "ask" };
+  assert.equal(retryableUnknownProviderCapability(unknownToolError(), aliases), "host_action_02");
+  assert.equal(retryableUnknownProviderCapability(unknownToolError("not_in_catalog"), aliases), undefined);
+  assert.equal(retryableUnknownProviderCapability(unknownToolError("ask"), aliases), undefined);
+  assert.equal(
+    retryableUnknownProviderCapability(unknownToolError("host_action_02", { toolStepCount: 1 }), aliases),
+    undefined,
+  );
+});
+
+test("runProviderAttempts retries an unknown host action ID as structured output", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "ORIGINAL",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    recipientAliases: { host_action_02: "ask", ask: "ask" },
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw unknownToolError();
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /Mandatory provider retry correction/);
+  assert.doesNotMatch(prompts[1] ?? "", /host_action_02/);
+});
 
 test("classifies exact provider-hook denials as safe pre-execution failures", () => {
   assert.equal(
@@ -201,6 +276,41 @@ test("permission-conversion recovery permits only exact staged-media hydration r
     retryablePermissionConversionTool(error, { cwd, allowedMediaPaths: [mediaPath] }),
     "schedule",
   );
+});
+
+test("classifies exact invalid provider task IDs as safe pre-execution failures", () => {
+  assert.equal(retryableInvalidTaskId(invalidTaskIdError()), "none");
+  assert.equal(
+    retryableInvalidTaskId(invalidTaskIdError("none", { toolStepCount: 1 })),
+    undefined,
+  );
+  assert.equal(
+    retryableInvalidTaskId(invalidTaskIdError("none", {
+      toolSteps: [readFileEvent("README.md")],
+      toolStepCount: 1,
+    })),
+    undefined,
+  );
+});
+
+test("runProviderAttempts recovers an invalid task ID without reinforcing it", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "original OMP provider prompt",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw invalidTaskIdError();
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.equal(outcome.result.terminal.status, "SUCCESS");
+  assert.match(prompts[1] ?? "", /internal Antigravity action/i);
+  assert.doesNotMatch(prompts[1] ?? "", /manage_task|invalid task ID|\bnone\b/i);
 });
 
 test("runProviderAttempts retries a permission-conversion failure without echoing the tool name", async () => {

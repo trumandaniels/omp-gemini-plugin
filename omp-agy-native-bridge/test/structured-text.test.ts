@@ -82,22 +82,20 @@ test("JSON answer objects in the text slot are rendered instead of crashing", ()
   assert.match(parsed.text, /"maxConcurrency": 3/);
 });
 
-test("an object-valued nested bridge response is promoted and validated", () => {
+test("an object-valued nested host response is promoted and validated", () => {
   const parsed = parseAgyTerminalOutput(
     {
       structured_output: {
-        text: {
-          text: "",
-          tool_calls: [
+        response: {
+          response: "",
+          host_requests: [
             {
-              name: "glob",
-              arguments: { path: "~/.omp/agent/*" },
+              action_id: "glob",
+              input: { path: "~/.omp/agent/*" },
             },
           ],
-          finish_reason: "tool_use",
         },
-        tool_calls: [],
-        finish_reason: "stop",
+        host_requests: [],
       },
     },
     ["glob"],
@@ -109,24 +107,21 @@ test("an object-valued nested bridge response is promoted and validated", () => 
   });
 });
 
-test("an array-valued nested bridge response keeps the first provider turn", () => {
+test("an array-valued nested host response keeps the first provider turn", () => {
   const parsed = parseAgyTerminalOutput(
     {
       structured_output: {
-        text: [
+        response: [
           {
-            text: "Actual answer.",
-            tool_calls: [],
-            finish_reason: "stop",
+            response: "Actual answer.",
+            host_requests: [],
           },
           {
-            text: "Completed.",
-            tool_calls: [],
-            finish_reason: "stop",
+            response: "Completed.",
+            host_requests: [],
           },
         ],
-        tool_calls: [],
-        finish_reason: "stop",
+        host_requests: [],
       },
     },
     [],

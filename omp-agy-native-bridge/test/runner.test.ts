@@ -34,9 +34,8 @@ test("runAgy parses official stream-json shape", async () => {
   });
   assert.equal(result.terminal.status, "SUCCESS");
   assert.deepEqual(result.terminal.structured_output, {
-    text: "ok",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "ok",
+    host_requests: [],
   });
   assert.equal(result.toolSteps.length, 0);
   assert.equal(result.toolStepCount, 0);
@@ -47,7 +46,7 @@ test("runAgy parses official stream-json shape", async () => {
 test("runAgy tolerates an exact duplicate terminal result", async () => {
   const result = await runAgy(baseRunOptions("FAKE:DUPLICATE_RESULT"));
   assert.equal(result.terminal.status, "SUCCESS");
-  assert.equal(result.terminal.response, JSON.stringify({ text: "ok", tool_calls: [], finish_reason: "stop" }));
+  assert.equal(result.terminal.response, JSON.stringify({ response: "ok", host_requests: [] }));
   assert.equal(result.eventCount, 4);
 });
 

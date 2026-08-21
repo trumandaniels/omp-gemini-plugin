@@ -285,7 +285,7 @@ export async function runDoctor(
     } else {
       try {
         const prompt =
-          'Return exactly this structured response: {"text":"READY","tool_calls":[],"finish_reason":"stop"}. Do not use tools.';
+          'Return exactly this structured response: {"response":"READY","host_requests":[]}. Do not invoke internal actions.';
         const outcome = await runProviderAttempts({
           initialPrompt: prompt,
           enforceToolless: true,

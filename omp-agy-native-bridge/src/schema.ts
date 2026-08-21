@@ -197,9 +197,109 @@ function parseSerializedBridgeOutput(
   }
 }
 
-function parseResponseOrPlainText(response: string, allowedToolNames: readonly string[]): BridgeStructuredOutput {
+function hostRequestsOrEmpty(value: unknown): unknown[] | undefined {
+  if (value === undefined || value === null) return [];
+  return Array.isArray(value) ? value : undefined;
+}
+
+function isHostResponseEnvelope(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const hasResponse = Object.prototype.hasOwnProperty.call(value, "response");
+  const hasRequests = Object.prototype.hasOwnProperty.call(value, "host_requests");
+  if (!hasResponse && !hasRequests) return false;
+  return value.host_requests === undefined || value.host_requests === null || Array.isArray(value.host_requests);
+}
+
+function parseHostResponseOutputInternal(
+  value: unknown,
+  allowedActionIds: readonly string[],
+  depth: number,
+): BridgeStructuredOutput {
+  if (depth > MAX_NESTED_OBJECT_OUTPUT_DEPTH) {
+    throw new Error("agy structured_output contains too many nested host-response envelopes");
+  }
+  if (Array.isArray(value)) {
+    const first = value.find(isHostResponseEnvelope);
+    return first
+      ? parseHostResponseOutputInternal(first, allowedActionIds, depth + 1)
+      : plainJsonAnswer(value);
+  }
+  if (!isRecord(value)) {
+    if (value === null || value === undefined) throw new Error("agy structured_output must contain output data");
+    return plainJsonAnswer(value);
+  }
+
+  const nestedResponse = isHostResponseEnvelope(value.response)
+    ? value.response
+    : Array.isArray(value.response)
+      ? value.response.find(isHostResponseEnvelope)
+      : undefined;
+  const outerRequests = hostRequestsOrEmpty(value.host_requests);
+  if (nestedResponse && outerRequests?.length === 0) {
+    return parseHostResponseOutputInternal(nestedResponse, allowedActionIds, depth + 1);
+  }
+  if (!isHostResponseEnvelope(value)) return plainJsonAnswer(value);
+
+  const rawRequests = hostRequestsOrEmpty(value.host_requests);
+  if (!rawRequests) throw new Error("agy structured_output.host_requests must be an array or null when supplied");
+  const text = normalizeBridgeText(value.response);
+  if (rawRequests.length > 32) throw new Error("agy requested more than 32 host actions in one turn");
+
+  const allowed = new Set(allowedActionIds);
+  const requestIds = new Set<string>();
+  const calls = rawRequests.map((item, index) => {
+    if (!isRecord(item)) throw new Error(`host_requests[${index}] must be an object`);
+    if (typeof item.action_id !== "string" || !allowed.has(item.action_id)) {
+      throw new Error(`host_requests[${index}] named unavailable host action: ${String(item.action_id)}`);
+    }
+    const argumentsValue = normalizeToolArguments(item.input, index, "host_requests", "input");
+    const id = normalizeToolCallId(item.request_id);
+    if (id !== undefined) {
+      if (requestIds.has(id)) throw new Error(`Duplicate host request id: ${id}`);
+      requestIds.add(id);
+    }
+    return {
+      ...(id === undefined ? {} : { id }),
+      name: item.action_id,
+      arguments: argumentsValue,
+    };
+  });
+
+  if (calls.length === 0 && text.length === 0) {
+    throw new Error("agy structured_output must contain a response or at least one host request");
+  }
+  return {
+    text,
+    tool_calls: calls,
+    finish_reason: calls.length > 0 ? "tool_use" : "stop",
+  };
+}
+
+export function parseHostResponseOutput(
+  value: unknown,
+  allowedActionIds: readonly string[],
+): BridgeStructuredOutput {
+  return parseHostResponseOutputInternal(value, allowedActionIds, 0);
+}
+
+function parseSerializedHostResponse(
+  value: string,
+  allowedActionIds: readonly string[],
+): BridgeStructuredOutput {
+  const normalized = normalizeSerializedBridgeOutput(value);
   try {
-    return parseSerializedBridgeOutput(response, allowedToolNames);
+    return parseHostResponseOutput(JSON.parse(normalized), allowedActionIds);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    const first = firstJsonObject(normalized);
+    if (first !== undefined) return parseHostResponseOutput(first, allowedActionIds);
+    throw error;
+  }
+}
+
+function parseResponseOrPlainText(response: string, allowedActionIds: readonly string[]): BridgeStructuredOutput {
+  try {
+    return parseSerializedHostResponse(response, allowedActionIds);
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
     return {
@@ -217,8 +317,8 @@ export function parseAgyTerminalOutput(
   if (terminal.structured_output !== undefined && terminal.structured_output !== null) {
     try {
       return typeof terminal.structured_output === "string"
-        ? parseSerializedBridgeOutput(terminal.structured_output, allowedToolNames)
-        : parseBridgeStructuredOutput(terminal.structured_output, allowedToolNames);
+        ? parseSerializedHostResponse(terminal.structured_output, allowedToolNames)
+        : parseHostResponseOutput(terminal.structured_output, allowedToolNames);
     } catch (error) {
       // A syntactically malformed serialized structured_output has no trustworthy
       // executable semantics. If AGY also supplied its normal response channel,
@@ -265,7 +365,12 @@ function sanitizeJsonValue(value: unknown, path: string, depth = 0): unknown {
   return result;
 }
 
-function normalizeToolArguments(value: unknown, index: number): Record<string, unknown> {
+function normalizeToolArguments(
+  value: unknown,
+  index: number,
+  collection = "tool_calls",
+  field = "arguments",
+): Record<string, unknown> {
   if (value === undefined || value === null) return {};
   let candidate = value;
   if (typeof candidate === "string") {
@@ -274,13 +379,13 @@ function normalizeToolArguments(value: unknown, index: number): Record<string, u
     try {
       candidate = JSON.parse(trimmed);
     } catch {
-      throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+      throw new Error(`${collection}[${index}].${field} must be an object or a JSON-encoded object`);
     }
   }
   if (!isRecord(candidate)) {
-    throw new Error(`tool_calls[${index}].arguments must be an object or a JSON-encoded object`);
+    throw new Error(`${collection}[${index}].${field} must be an object or a JSON-encoded object`);
   }
-  return sanitizeJsonValue(candidate, `tool_calls[${index}].arguments`) as Record<string, unknown>;
+  return sanitizeJsonValue(candidate, `${collection}[${index}].${field}`) as Record<string, unknown>;
 }
 
 function normalizeToolCallId(value: unknown): string | undefined {
@@ -408,22 +513,17 @@ export function serializeTools(
   return out;
 }
 
-export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<string, unknown> {
-  const uniqueNames = [...new Set(toolNames)].sort();
-  const toolCallItems: Record<string, unknown> = {
+export function buildBridgeOutputSchema(actionIds: readonly string[]): Record<string, unknown> {
+  const uniqueIds = [...new Set(actionIds)].sort();
+  const requestItems: Record<string, unknown> = {
     type: "object",
     additionalProperties: true,
     properties: {
-      // `id` and `arguments` are intentionally permissive at the AGY schema
-      // boundary. The bridge normalizes correlation ids and fully validates /
-      // sanitizes arguments before OMP sees a call. Keeping the outer schema
-      // looser prevents recoverable model-wrapper representation drift from
-      // becoming an upstream structured-output failure.
-      id: {},
-      name: uniqueNames.length > 0 ? { type: "string", enum: uniqueNames } : { type: "string" },
-      arguments: {},
+      request_id: {},
+      action_id: uniqueIds.length > 0 ? { type: "string", enum: uniqueIds } : { type: "string" },
+      input: {},
     },
-    required: ["name"],
+    required: ["action_id"],
   };
 
   return {
@@ -431,20 +531,11 @@ export function buildBridgeOutputSchema(toolNames: readonly string[]): Record<st
     type: "object",
     additionalProperties: true,
     properties: {
-      // Parser support is intentionally wider than plain string: AGY/model
-      // wrappers have returned null, content-block arrays, Gemini-style parts,
-      // scalar JSON, and JSON answer objects here. None controls execution.
-      text: {},
-      tool_calls: uniqueNames.length > 0
-        ? { type: ["array", "null"], items: toolCallItems, maxItems: 32 }
+      response: {},
+      host_requests: uniqueIds.length > 0
+        ? { type: ["array", "null"], items: requestItems, maxItems: 32 }
         : { type: ["array", "null"], maxItems: 0 },
-      // Compatibility-only input. Different AGY releases/model wrappers have
-      // produced different spellings/shapes here. The bridge never trusts it;
-      // canonical completion state is derived from the validated tool calls.
-      finish_reason: {},
     },
-    // Presence is a semantic question handled after normalization: text-only
-    // answers may omit tool_calls, and tool-only turns may omit text.
   };
 }
 

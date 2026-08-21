@@ -64,14 +64,15 @@ test("computer choice maps only to an active computer tool", () => {
   assert.equal(resolved.requiredToolName, "computer");
 });
 
-test("tool-forced prompt correction survives as an explicit provider constraint", () => {
+test("forced host action survives as an explicit provider constraint", () => {
   const prompt = appendToolChoiceInstruction("base", {
     requireToolCall: true,
-    requiredToolName: "read",
+    requiredToolName: "host_action_02",
   });
-  assert.match(prompt, /tool-forced/i);
-  assert.match(prompt, /OMP tool "read"/);
-  assert.match(prompt, /outer "tool_calls" array/);
+  assert.match(prompt, /Host-action requirement/);
+  assert.match(prompt, /host action "host_action_02"/);
+  assert.match(prompt, /"host_requests"/);
+  assert.doesNotMatch(prompt, /tool_calls|OMP tool/);
 });
 
 test("forced-tool result validation rejects text-only or wrong-tool completions", () => {

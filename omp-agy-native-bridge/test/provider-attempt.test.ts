@@ -114,9 +114,8 @@ test("runProviderAttempts recovers the exact missing OMP recipient failure once"
   assert.equal(outcome.discardedUsage.length, 1);
   assert.equal(outcome.discardedUsage[0]?.total_tokens, 7);
   assert.deepEqual(outcome.result.terminal.structured_output, {
-    text: "recovered without AGY messaging",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "recovered without AGY messaging",
+    host_requests: [],
   });
 });
 
@@ -251,7 +250,7 @@ test("runProviderAttempts forwards staged-media guard options to recipient recov
   assert.equal(outcome.result.terminal.status, "SUCCESS");
 });
 
-test("runProviderAttempts retries a missing OMP tool recipient through opaque capability guidance", async () => {
+test("runProviderAttempts retries a missing OMP action recipient through neutral host guidance", async () => {
   const prompts: string[] = [];
   const outcome = await runProviderAttempts({
     initialPrompt: "Use read to inspect package.json",
@@ -267,9 +266,9 @@ test("runProviderAttempts retries a missing OMP tool recipient through opaque ca
   assert.equal(outcome.attempts, 2);
   assert.equal(outcome.discardedUsage.length, 1);
   assert.match(prompts[1] ?? "", /recipient named "read"/);
-  assert.match(prompts[1] ?? "", /opaque aliases/);
-  assert.match(prompts[1] ?? "", /outer "tool_calls" array/);
-  assert.doesNotMatch(prompts[1] ?? "", /OMP tool names such as read, glob, grep, bash/);
+  assert.match(prompts[1] ?? "", /Available host actions/);
+  assert.match(prompts[1] ?? "", /host_requests\[\]\.action_id/);
+  assert.doesNotMatch(prompts[1] ?? "", /tool_calls|OMP tool names such as read, glob, grep, bash/);
 });
 
 test("runProviderAttempts retries recipient subagent through generic OMP orchestration guidance", async () => {
@@ -289,7 +288,7 @@ test("runProviderAttempts retries recipient subagent through generic OMP orchest
   assert.equal(outcome.discardedUsage.length, 1);
   assert.match(prompts[1] ?? "", /recipient named "subagent"/);
   assert.match(prompts[1] ?? "", /OMP agents or subagents/);
-  assert.match(prompts[1] ?? "", /host capability whose description\/schema performs that orchestration/);
+  assert.match(prompts[1] ?? "", /host action whose purpose and input schema perform that orchestration/);
   assert.doesNotMatch(prompts[1] ?? "", /request the OMP "task" tool/);
 });
 
@@ -313,8 +312,8 @@ test("runProviderAttempts uses one final attempt when the corrected retry still 
   assert.match(prompts[1] ?? "", /recipient named "omp"/);
   assert.match(prompts[2] ?? "", /Final provider routing correction/);
   assert.match(prompts[2] ?? "", /final safe routing recovery/);
-  assert.match(prompts[2] ?? "", /Do not select any Antigravity-native capability/);
-  assert.match(prompts[2] ?? "", /outer "tool_calls" array/);
+  assert.match(prompts[2] ?? "", /Do not select any Antigravity-native action/);
+  assert.match(prompts[2] ?? "", /host_requests\[\]\.action_id/);
 });
 
 test("runProviderAttempts never performs a fourth AGY attempt after repeated missing recipients", async () => {

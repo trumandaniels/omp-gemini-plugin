@@ -34,11 +34,10 @@ if (prompt.includes("FAKE:CHILD")) {
 const correctedMissingRecipient = prompt.includes("Mandatory provider routing correction")
   || prompt.includes("Provider mode has no internal messaging return path");
 const structured = {
-  text: prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && correctedMissingRecipient
+  response: prompt.includes("FAKE:MISSING_OMP_RECIPIENT") && correctedMissingRecipient
     ? "recovered without AGY messaging"
     : "ok",
-  tool_calls: [],
-  finish_reason: "stop",
+  host_requests: [],
 };
 console.log(
   JSON.stringify({
@@ -163,7 +162,7 @@ if (prompt.includes("FAKE:CONFLICTING_RESULT")) {
   console.log(
     JSON.stringify({
       event: "result",
-      result: { ...terminal, response: "conflicting terminal", structured_output: { text: "conflict", tool_calls: [] } },
+      result: { ...terminal, response: "conflicting terminal", structured_output: { response: "conflict", host_requests: [] } },
     }),
   );
 }

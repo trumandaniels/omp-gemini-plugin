@@ -3,19 +3,24 @@ import test from "node:test";
 
 import { aliasOmpToolCatalog, restoreOmpToolNames } from "../src/tool-alias.ts";
 
-test("OMP tools receive opaque AGY-facing aliases", () => {
+test("OMP actions receive neutral AGY-facing IDs and catalog fields", () => {
   const aliases = aliasOmpToolCatalog([
     { name: "task", description: "Run an OMP subagent", parameters: { type: "object" } },
     { name: "read", description: "Read through OMP", parameters: { type: "object" } },
   ]);
 
-  assert.deepEqual(aliases.wireCatalog.map((tool) => tool.name), [
-    "omp_capability_01",
-    "omp_capability_02",
+  assert.deepEqual(aliases.wireCatalog.map((action) => action.id), [
+    "host_action_01",
+    "host_action_02",
   ]);
-  assert.equal(aliases.wireToOmpToolName.omp_capability_01, "task");
-  assert.equal(aliases.ompToWireToolName.read, "omp_capability_02");
-  assert.doesNotMatch(aliases.wireCatalog[0]?.name ?? "", /task|manage/i);
+  assert.deepEqual(aliases.wireCatalog[0], {
+    id: "host_action_01",
+    purpose: "Run an OMP subagent",
+    input_schema: { type: "object" },
+  });
+  assert.equal(aliases.wireToOmpToolName.host_action_01, "task");
+  assert.equal(aliases.ompToWireToolName.read, "host_action_02");
+  assert.doesNotMatch(JSON.stringify(aliases.wireCatalog), /"name"|"description"|"parameters"/);
 });
 
 test("validated wire aliases restore exact OMP tool names", () => {
@@ -27,7 +32,7 @@ test("validated wire aliases restore exact OMP tool names", () => {
     restoreOmpToolNames(
       {
         text: "",
-        tool_calls: [{ name: "omp_capability_01", arguments: { prompt: "audit it" } }],
+        tool_calls: [{ name: "host_action_01", arguments: { prompt: "audit it" } }],
         finish_reason: "tool_use",
       },
       aliases.wireToOmpToolName,
@@ -45,12 +50,12 @@ test("unknown wire aliases fail closed", () => {
     () => restoreOmpToolNames(
       {
         text: "",
-        tool_calls: [{ name: "omp_capability_99", arguments: {} }],
+        tool_calls: [{ name: "host_action_99", arguments: {} }],
         finish_reason: "tool_use",
       },
       {},
     ),
-    /unknown OMP capability alias/,
+    /unknown action ID/,
   );
 });
 

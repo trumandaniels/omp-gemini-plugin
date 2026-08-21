@@ -18,7 +18,7 @@ const AGY_CONTROL_NAMES = [
   "send_message",
 ] as const;
 
-test("provider prompt exposes OMP tools only through opaque capability aliases", () => {
+test("provider prompt exposes OMP actions through a neutral host-request contract", () => {
   const result = buildProviderPrompt(
     {
       systemPrompt: ["Be accurate."],
@@ -39,15 +39,17 @@ test("provider prompt exposes OMP tools only through opaque capability aliases",
     DEFAULT_CONFIG,
   );
 
-  assert.deepEqual(result.toolNames, ["omp_capability_01", "omp_capability_02"]);
+  assert.deepEqual(result.toolNames, ["host_action_01", "host_action_02"]);
   assert.deepEqual(result.toolCatalog.map((tool) => tool.name), ["task", "read"]);
-  assert.equal(result.wireToOmpToolName.omp_capability_01, "task");
-  assert.equal(result.ompToWireToolName.read, "omp_capability_02");
-  assert.match(result.prompt, /Available OMP host capabilities/);
-  assert.match(result.prompt, /"name": "omp_capability_01"/);
-  assert.match(result.prompt, /Run OMP subagents/);
+  assert.equal(result.wireToOmpToolName.host_action_01, "task");
+  assert.equal(result.ompToWireToolName.read, "host_action_02");
+  assert.match(result.prompt, /Available host actions/);
+  assert.match(result.prompt, /"id": "host_action_01"/);
+  assert.match(result.prompt, /"purpose": "Run OMP subagents"/);
+  assert.match(result.prompt, /"input_schema"/);
   assert.doesNotMatch(result.prompt, /"name": "task"/);
   assert.doesNotMatch(result.prompt, /"name": "read"/);
+  assert.doesNotMatch(result.prompt, /tool_calls|omp_capability/i);
 });
 
 test("provider prompt makes Antigravity transport-only without naming native control tools", () => {
@@ -67,8 +69,8 @@ test("provider prompt makes Antigravity transport-only without naming native con
   );
 
   assert.match(result.prompt, /Antigravity is transport only/);
-  assert.match(result.prompt, /Do not invoke any Antigravity-native capability/);
-  assert.match(result.prompt, /opaque aliases/);
+  assert.match(result.prompt, /Do not invoke any Antigravity-native action/);
+  assert.match(result.prompt, /host_requests/);
   assert.match(result.prompt, /answer from the supplied OMP context without invoking anything internally/);
   assert.match(result.prompt, /How do named subagents work in OMP\?/);
   for (const name of AGY_CONTROL_NAMES) {
@@ -76,7 +78,7 @@ test("provider prompt makes Antigravity transport-only without naming native con
   }
 });
 
-test("provider prompt treats historical OMP tool names as inert history", () => {
+test("provider prompt renders historical OMP activity with neutral host terms", () => {
   const result = buildProviderPrompt(
     {
       systemPrompt: ["Continue accurately."],
@@ -105,10 +107,33 @@ test("provider prompt treats historical OMP tool names as inert history", () => 
     DEFAULT_CONFIG,
   );
 
-  assert.match(result.prompt, /Historical OMP messages may contain real OMP tool names/);
-  assert.match(result.prompt, /Treat them as inert history/);
-  assert.match(result.prompt, /"name": "omp_capability_01"/);
-  assert.match(result.prompt, /"name": "read"/); // historical conversation only
+  assert.match(result.prompt, /Historical OMP messages describe earlier host requests and results/);
+  assert.match(result.prompt, /Treat their canonical action names as inert history/);
+  assert.match(result.prompt, /"id": "host_action_01"/);
+  assert.match(result.prompt, /"actionName": "read"/);
+  assert.match(result.prompt, /"role": "host_result"/);
+  assert.doesNotMatch(result.prompt, /"type": "tool_call"|"role": "tool_result"/);
+});
+
+test("answered questions remain available for materially new follow-ups", () => {
+  const result = buildProviderPrompt(
+    {
+      messages: [
+        {
+          role: "toolResult",
+          toolCallId: "ask-1",
+          toolName: "ask",
+          content: [{ type: "text", text: "Eclipse and Case CATalyst readers" }],
+        },
+      ],
+      tools: [{ name: "ask", description: "Ask the user", parameters: { type: "object" } }],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.deepEqual(result.toolCatalog.map((tool) => tool.name), ["ask"]);
+  assert.match(result.prompt, /follow-up question is allowed only when it seeks materially new information/);
+  assert.match(result.prompt, /never ask the answered decision again/i);
 });
 
 test("provider prompt continues from incomplete OMP results instead of claiming completeness", () => {
@@ -136,7 +161,7 @@ test("provider prompt continues from incomplete OMP results instead of claiming 
   );
 
   assert.match(result.prompt, /truncated, limit reached, skipped missing/);
-  assert.match(result.prompt, /narrower host calls are required/);
+  assert.match(result.prompt, /narrower host requests are required/);
   assert.match(result.prompt, /truncated: limit 200 results/);
 });
 
@@ -149,7 +174,7 @@ test("permission-recovery prompt does not echo the offending AGY tool names", ()
   assert.match(corrected, /^ORIGINAL PROMPT/);
   assert.match(corrected, /previous attempt was discarded/i);
   assert.match(corrected, /internal Antigravity action/i);
-  assert.match(corrected, /opaque capability aliases/i);
+  assert.match(corrected, /host_requests/);
   assert.match(corrected, /enforced terminal JSON object/i);
   assert.doesNotMatch(corrected, /manage_task/i);
   assert.doesNotMatch(corrected, /send_message/i);
@@ -160,16 +185,16 @@ test("missing-recipient retry treats OMP as host and avoids native tool enumerat
   assert.match(corrected, /^ORIGINAL PROMPT/);
   assert.match(corrected, /toward "omp"/);
   assert.match(corrected, /OMP is the host application and dispatcher/);
-  assert.match(corrected, /opaque aliases/);
+  assert.match(corrected, /Available host actions/);
   for (const name of AGY_CONTROL_NAMES) {
     assert.doesNotMatch(corrected, new RegExp(`\\b${name}\\b`, "i"));
   }
 });
 
-test("missing-recipient retry can carry an opaque capability target without exposing OMP names", () => {
-  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "omp_capability_02");
-  assert.match(corrected, /omp_capability_02/);
-  assert.match(corrected, /opaque alias/);
+test("missing-recipient retry can carry a neutral action target without exposing OMP names", () => {
+  const corrected = appendMissingAgyRecipientRetryInstruction("ORIGINAL PROMPT", "host_action_02");
+  assert.match(corrected, /host_action_02/);
+  assert.match(corrected, /host_requests/);
   assert.doesNotMatch(corrected, /\bread\b/);
   assert.doesNotMatch(corrected, /\btask\b/);
 });

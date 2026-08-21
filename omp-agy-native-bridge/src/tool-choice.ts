@@ -60,9 +60,9 @@ export function appendToolChoiceInstruction(
 ): string {
   if (!resolution.requireToolCall) return prompt;
   const target = resolution.requiredToolName
-    ? `the OMP tool ${JSON.stringify(resolution.requiredToolName)}`
-    : "at least one available OMP tool";
-  return `${prompt}\n\n# OMP tool-choice constraint\nThis turn is tool-forced by the OMP caller. Return ${target} in the outer \"tool_calls\" array. Do not answer with text only, and do not use any Antigravity tool.`;
+    ? `the host action ${JSON.stringify(resolution.requiredToolName)}`
+    : "at least one available host action";
+  return `${prompt}\n\n# Host-action requirement\nThis turn requires external work. Return ${target} in "host_requests" using "action_id" and "input". Do not answer with only "response", and do not invoke any Antigravity-native action.`;
 }
 
 /** Fail closed when AGY ignores a host-level forced-tool requirement. */

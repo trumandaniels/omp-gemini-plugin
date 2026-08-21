@@ -279,8 +279,8 @@ export function synthesizeMissingRecipientRecovery(
   const isSubagentRole = SUBAGENT_ROLE_RECIPIENTS.has(normalizedRecipient);
   const isTaskRecipient = normalizedRecipient === "task";
   const matchesAvailableTool = tools.some((tool) => normalizedToken(tool.name) === normalizedRecipient);
-  const isOpaqueCapability = normalizedRecipient.startsWith("ompcapability");
-  const isNamedAgent = !matchesAvailableTool && !isOpaqueCapability;
+  const isHostActionId = normalizedRecipient.startsWith("hostaction");
+  const isNamedAgent = !matchesAvailableTool && !isHostActionId;
   if (!isSubagentRole && !isTaskRecipient && !isNamedAgent) return undefined;
   if (message.length < 8 || CONTROL_ONLY_MESSAGES.has(normalizedToken(message))) return undefined;
 

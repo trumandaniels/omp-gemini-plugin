@@ -1,22 +1,27 @@
 import type { SerializedTool } from "./schema.ts";
 import type { BridgeStructuredOutput } from "./types.ts";
 
+export interface HostActionCatalogEntry {
+  id: string;
+  purpose: string;
+  input_schema: Record<string, unknown>;
+}
+
 export interface AliasedToolCatalog {
-  wireCatalog: SerializedTool[];
+  wireCatalog: HostActionCatalogEntry[];
   wireToOmpToolName: Readonly<Record<string, string>>;
   ompToWireToolName: Readonly<Record<string, string>>;
 }
 
-const WIRE_PREFIX = "omp_capability_";
+const WIRE_PREFIX = "host_action_";
 
 /**
- * Give every OMP tool an opaque provider-wire name.
+ * Give every OMP action an opaque provider-wire identifier.
  *
- * Antigravity has its own built-in tool namespace. Reusing OMP names such as
- * `task`, `read`, or `hub` in the AGY-facing schema makes model-side tool routing
- * more likely to confuse an OMP request with an Antigravity-native action. The
- * bridge therefore exposes only deterministic opaque aliases to AGY and restores
- * the real OMP names after the terminal envelope has been validated.
+ * Antigravity has its own native action namespace. Reusing OMP names or a
+ * function-call-shaped catalog makes Gemini more likely to route a host request
+ * through that namespace. The bridge exposes neutral IDs and catalog fields,
+ * then restores canonical OMP names only after AGY returns.
  */
 export function aliasOmpToolCatalog(catalog: readonly SerializedTool[]): AliasedToolCatalog {
   const wireToOmpToolName: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -31,19 +36,14 @@ export function aliasOmpToolCatalog(catalog: readonly SerializedTool[]): Aliased
 
     const wireName = `${WIRE_PREFIX}${String(index + 1).padStart(2, "0")}`;
     wireToOmpToolName[wireName] = tool.name;
-    // Deterministic host-side recovery can synthesize an already-canonical OMP
-    // call without passing through AGY. Identity entries let the final restore
-    // step accept that trusted host result while the actual AGY schema still
-    // exposes only opaque aliases.
+    // Identity entries let trusted host-synthesized calls pass final restoration.
+    // Only neutral IDs are exposed in the actual AGY schema and prompt catalog.
     wireToOmpToolName[tool.name] = tool.name;
     ompToWireToolName[tool.name] = wireName;
     return {
-      ...tool,
-      name: wireName,
-      description: [
-        "OMP host capability. Request it only by returning this alias in the outer tool_calls array; do not execute an Antigravity-native action.",
-        tool.description,
-      ].filter(Boolean).join("\n"),
+      id: wireName,
+      purpose: tool.description,
+      input_schema: tool.parameters,
     };
   });
 
@@ -59,7 +59,7 @@ export function restoreOmpToolNames(
     tool_calls: output.tool_calls.map((call, index) => {
       const ompName = wireToOmpToolName[call.name];
       if (!ompName) {
-        throw new Error(`tool_calls[${index}] named unknown OMP capability alias: ${call.name}`);
+        throw new Error(`host request ${index} named unknown action ID: ${call.name}`);
       }
       return { ...call, name: ompName };
     }),

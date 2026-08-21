@@ -3,20 +3,18 @@ import test from "node:test";
 
 import { unwrapNestedBridgeOutput } from "../src/nested-output.ts";
 
-test("unwrapNestedBridgeOutput recovers a fenced tool call serialized inside text", () => {
+test("unwrapNestedBridgeOutput recovers fenced host requests serialized inside response", () => {
   const nested = [
     {
-      text: "",
-      tool_calls: [
-        { name: "glob", arguments: { i: "Listing repository root files", path: "*" } },
-        { name: "read", arguments: { i: "Reading README if present", path: "README.md" } },
+      response: "",
+      host_requests: [
+        { action_id: "glob", input: { i: "Listing repository root files", path: "*" } },
+        { action_id: "read", input: { i: "Reading README if present", path: "README.md" } },
       ],
-      finish_reason: "tool_use",
     },
     {
-      text: "Completed.",
-      tool_calls: [],
-      finish_reason: "stop",
+      response: "Completed.",
+      host_requests: [],
     },
   ].map((value) => JSON.stringify(value, null, 2)).join("\n");
 
@@ -40,16 +38,14 @@ test("unwrapNestedBridgeOutput recovers a fenced tool call serialized inside tex
   );
 });
 
-test("unwrapNestedBridgeOutput recursively unwraps a double-encoded bridge result", () => {
+test("unwrapNestedBridgeOutput recursively unwraps a double-encoded host response", () => {
   const innermost = JSON.stringify({
-    text: "Recovered answer.",
-    tool_calls: [],
-    finish_reason: "stop",
+    response: "Recovered answer.",
+    host_requests: [],
   });
   const middle = JSON.stringify({
-    text: innermost,
-    tool_calls: [],
-    finish_reason: "stop",
+    response: innermost,
+    host_requests: [],
   });
 
   assert.deepEqual(
@@ -79,11 +75,10 @@ test("unwrapNestedBridgeOutput preserves JSON-only user-visible text that is not
   assert.deepEqual(unwrapNestedBridgeOutput(output, []), output);
 });
 
-test("unwrapNestedBridgeOutput never executes a nested unavailable tool", () => {
+test("unwrapNestedBridgeOutput never executes an unavailable nested host request", () => {
   const nested = JSON.stringify({
-    text: "",
-    tool_calls: [{ name: "unavailable", arguments: {} }],
-    finish_reason: "tool_use",
+    response: "",
+    host_requests: [{ action_id: "unavailable", input: {} }],
   });
   const output = { text: nested, tool_calls: [], finish_reason: "stop" as const };
   assert.deepEqual(unwrapNestedBridgeOutput(output, ["read"]), output);

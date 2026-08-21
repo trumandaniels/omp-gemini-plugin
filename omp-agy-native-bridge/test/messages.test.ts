@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { serializeConversation } from "../src/messages.ts";
 
-test("conversation serialization preserves tool-call IDs and omits private reasoning", () => {
+test("conversation serialization uses neutral host history and omits private reasoning", () => {
   const serialized = serializeConversation(
     {
       systemPrompt: ["System"],
@@ -26,9 +26,11 @@ test("conversation serialization preserves tool-call IDs and omits private reaso
     { maxHistoryChars: 100_000 },
   );
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.messages[0].content[1].id, "call-1");
-  assert.equal(parsed.messages[1].toolCallId, "call-1");
-  assert.doesNotMatch(serialized, /private/);
+  assert.equal(parsed.messages[0].content[1].requestId, "call-1");
+  assert.equal(parsed.messages[0].content[1].type, "host_request_history");
+  assert.equal(parsed.messages[1].requestId, "call-1");
+  assert.equal(parsed.messages[1].role, "host_result");
+  assert.doesNotMatch(serialized, /private|tool_call|tool_result/);
 });
 
 test("conversation serialization replaces image bytes with attachment placeholders", () => {

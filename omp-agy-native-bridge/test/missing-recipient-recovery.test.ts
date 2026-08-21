@@ -497,7 +497,7 @@ test("provider attempts can recover an exact bridge envelope addressed to OMP", 
   });
 });
 
-test("provider attempts recover JSON arguments sent to an opaque capability recipient", async () => {
+test("provider attempts encode recovered arguments in the neutral host envelope", async () => {
   let calls = 0;
   const readTool: SerializedTool = {
     name: "read",
@@ -513,19 +513,18 @@ test("provider attempts recover JSON arguments sent to an opaque capability reci
     enforceToolless: true,
     agentName: "omp-bridge-model",
     ompTools: [readTool],
-    recipientAliases: { omp_capability_02: "read", read: "read" },
+    recipientAliases: { host_action_02: "read", read: "read" },
     invoke: async () => {
       calls += 1;
-      throw missingRecipientError("omp_capability_02", JSON.stringify({ path: "package.json" }));
+      throw missingRecipientError("host_action_02", JSON.stringify({ path: "package.json" }));
     },
   });
 
   assert.equal(calls, 1);
   assert.equal(outcome.attempts, 1);
   assert.deepEqual(outcome.result.terminal.structured_output, {
-    text: "",
-    tool_calls: [{ name: "omp_capability_02", arguments: { path: "package.json" } }],
-    finish_reason: "tool_use",
+    response: "",
+    host_requests: [{ action_id: "host_action_02", input: { path: "package.json" } }],
   });
 });
 
@@ -538,7 +537,7 @@ test("unsupported missing recipients keep the existing bounded retry path", asyn
     ompTools: [batchTaskTool],
     invoke: async () => {
       calls += 1;
-      if (calls === 1) throw missingRecipientError("omp_capability_99", "package.json");
+      if (calls === 1) throw missingRecipientError("host_action_99", "package.json");
       return successfulResult();
     },
   });

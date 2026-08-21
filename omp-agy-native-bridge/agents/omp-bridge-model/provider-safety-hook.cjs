@@ -78,7 +78,7 @@ function safeControlProbe(toolCall) {
   if (!args || typeof args !== "object" || Array.isArray(args)) return false;
   const actionEntry = Object.entries(args).find(([key]) => normalizedName(key) === "action");
   const action = normalizedName(actionEntry?.[1]);
-  return (name === "managetask" && (action === "list" || action === "status"))
+  return (name === "managetask" && action === "list")
     || (name === "managesubagents" && action === "list");
 }
 
@@ -88,7 +88,7 @@ function decide(input, env = process.env) {
   if (safeControlProbe(input?.toolCall)) return { decision: "allow" };
   return {
     decision: "deny",
-    reason: `${BLOCK_MARKER}: Provider mode forbids Antigravity-native actions. Return the enforced terminal JSON object directly; request host actions only through an opaque alias in its outer tool_calls array.`,
+    reason: `${BLOCK_MARKER}: Provider mode forbids Antigravity-native actions. Return the enforced terminal JSON object directly; describe external work only in host_requests using an ID from Available host actions.`,
   };
 }
 

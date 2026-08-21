@@ -18,7 +18,10 @@ import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
 
 const MISSING_RECIPIENT = /^recipient\s+(?:"([^"]+)"|'([^']+)'|`([^`]+)`|“([^”]+)”|‘([^’]+)’|([a-zA-Z0-9_.-]+))\s+(?:was\s+)?not\s+found\.?$/i;
 const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+([a-zA-Z0-9_.-]+):\s*convert tool call for permissions:/i;
-const MAX_PERMISSION_CONVERSION_RECOVERIES = 3;
+const INVALID_TASK_ID_FAILURE = /^invalid task ID format:\s*"([^"\r\n]+)"\.?$/i;
+const UNKNOWN_TOOL_FAILURE =
+  /^unknown tool:\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`|([a-zA-Z0-9_.-]+))(?:\s*-\s*check spelling)?\.?$/i;
+const MAX_PROVIDER_TRANSPORT_RECOVERIES = 3;
 const PROVIDER_BOUNDARY_DENIAL = new RegExp(
   `^tool call denied by pre-tool hook:\\s*${PROVIDER_TOOL_BLOCK_MARKER}:`,
   "i",
@@ -79,11 +82,11 @@ function appendFinalMissingRecipientCorrection(
   return `${prompt}\n\n# Final provider routing correction
 A corrected provider attempt still tried internal Antigravity messaging toward missing recipient(s): ${names}.
 This is the final safe routing recovery for this OMP turn.
-- Do not select any Antigravity-native capability of any kind.
-- Do not address OMP, a host capability alias, a role label, or any other name as an Antigravity recipient.
+- Do not select any Antigravity-native action of any kind.
+- Do not address OMP, a host action ID, a role label, or any other name as an Antigravity recipient.
 - The enforced terminal JSON object is the only return channel.
-- If host action is needed, use only an opaque alias from the current OMP capability catalog in the outer \"tool_calls\" array.
-- If no host action is needed, put the final answer in \"text\" and return an empty \"tool_calls\" array.
+- If external work is needed, select an ID from "Available host actions" and place it in "host_requests[].action_id" with its input under "input".
+- Otherwise put the final answer in "response" and return an empty "host_requests" array.
 - Continue only from the supplied OMP prompt and ignore all internal routing attempts from discarded runs.`;
 }
 
@@ -98,10 +101,10 @@ function appendPermissionConversionRecovery(
   const corrected = appendProviderHarnessRetryInstruction(prompt, []);
   if (recoveryNumber <= 1) return corrected;
   return `${corrected}\n\n# Repeated provider transport correction
-This is safe recovery attempt ${recoveryNumber} after another pre-execution internal-capability routing failure.
+This is safe recovery attempt ${recoveryNumber} after another pre-execution internal-action routing failure.
 - A corrected attempt still selected the Antigravity harness. Do not plan, coordinate, inspect, message, create timed work, delegate, or manage work through Antigravity.
-- Skip internal capability selection entirely and produce the enforced terminal JSON object directly.
-- OMP host requests belong only in the outer \"tool_calls\" array using the opaque aliases supplied in the current catalog. A normal answer belongs only in \"text\".`;
+- Skip internal action selection entirely and produce the enforced terminal JSON object directly.
+- External OMP work belongs only in "host_requests" using IDs supplied under "Available host actions". A normal answer belongs only in "response".`;
 }
 
 /**
@@ -181,6 +184,49 @@ export function retryablePermissionConversionTool(
 }
 
 /**
+ * AGY sometimes tries to execute an opaque OMP wire alias as a native tool.
+ * Its exact unknown-tool diagnostic is pre-execution, so retry only when the
+ * rejected name belongs to this turn's alias catalog and no other activity ran.
+ */
+export function retryableUnknownProviderCapability(
+  error: unknown,
+  aliases: Readonly<Record<string, string>> | undefined,
+  options: ProviderHarnessGuardOptions = {},
+): string | undefined {
+  if (!(error instanceof AgyRunError) || error.terminal?.status !== "ERROR" || !aliases) return undefined;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string") return undefined;
+  const match = UNKNOWN_TOOL_FAILURE.exec(terminalError.trim());
+  const toolName = match?.slice(1).find((value): value is string => Boolean(value));
+  if (!toolName || aliases[toolName] === undefined || aliases[toolName] === toolName) return undefined;
+  if (!providerHarnessSnapshotsComplete(error) || error.subagents.length > 0) return undefined;
+  if (unexpectedProviderHarnessToolSteps(error.toolSteps, options).length > 0) return undefined;
+  return toolName;
+}
+
+/**
+ * AGY rejects a fabricated task ID before a task-control action can execute.
+ * Treat that exact failure like permission conversion only when the complete
+ * activity snapshot contains no work beyond harmless control probes.
+ */
+export function retryableInvalidTaskId(
+  error: unknown,
+  options: ProviderHarnessGuardOptions = {},
+): string | undefined {
+  if (!(error instanceof AgyRunError)) return undefined;
+  if (error.terminal?.status !== "ERROR") return undefined;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string") return undefined;
+  const match = INVALID_TASK_ID_FAILURE.exec(terminalError.trim());
+  if (!match) return undefined;
+  if (!providerHarnessSnapshotsComplete(error) || error.subagents.length > 0) return undefined;
+
+  const unexpected = unexpectedProviderHarnessToolSteps(error.toolSteps, options);
+  if (unexpected.length > 0 && !retryableProviderControlToolNames(unexpected, options)) return undefined;
+  return match[1];
+}
+
+/**
  * The installed provider hook returns this exact marker only after denying a
  * native AGY action before execution. A corrected retry is safe when all
  * activity snapshots are complete and contain no other executable activity.
@@ -242,7 +288,7 @@ export interface ProviderAttemptOutcome {
   attempts: number;
 }
 
-function aliasSyntheticToolCalls(
+function encodeSyntheticHostResponse(
   result: AgyRunResult,
   aliases: Readonly<Record<string, string>> | undefined,
 ): AgyRunResult {
@@ -252,24 +298,27 @@ function aliasSyntheticToolCalls(
 
   const ompToWire = new Map<string, string>();
   for (const [candidate, canonical] of Object.entries(aliases)) {
-    // Identity entries are present for final restoration. Prefer an actual opaque
-    // alias when translating a host-synthesized canonical call back onto the AGY
-    // wire contract.
     if (candidate !== canonical && !ompToWire.has(canonical)) ompToWire.set(canonical, candidate);
   }
-  if (ompToWire.size === 0) return result;
-
-  const toolCalls = structured.tool_calls.map((call) => {
+  const hostRequests = structured.tool_calls.map((call) => {
     if (!isRecord(call) || typeof call.name !== "string") return call;
-    const alias = ompToWire.get(call.name);
-    return alias ? { ...call, name: alias } : call;
+    return {
+      ...(call.id === undefined ? {} : { request_id: call.id }),
+      action_id: ompToWire.get(call.name) ?? call.name,
+      input: call.arguments ?? {},
+    };
   });
+  const wireOutput = {
+    response: structured.text ?? "",
+    host_requests: hostRequests,
+  };
 
   return {
     ...result,
     terminal: {
       ...result.terminal,
-      structured_output: { ...structured, tool_calls: toolCalls },
+      response: JSON.stringify(wireOutput),
+      structured_output: wireOutput,
     },
   };
 }
@@ -277,10 +326,10 @@ function aliasSyntheticToolCalls(
 /**
  * Run AGY with tightly bounded provider-mode recovery budgets.
  *
- * Every AGY invocation passes through the same permission-conversion recovery
- * wrapper. Up to three proven side-effect-free permission failures are discarded
- * across the whole OMP turn; a fourth is surfaced rather than risking an
- * unbounded model loop.
+ * Every AGY invocation passes through the same pre-execution transport recovery
+ * wrapper. Up to three proven side-effect-free permission, boundary-hook, or
+ * invalid-task-ID failures are discarded across the whole OMP turn; a fourth is
+ * surfaced rather than risking an unbounded model loop.
  *
  * When a failed AGY send is unambiguous, prefer deterministic transport recovery
  * over another model call. Provider aliases are mapped to canonical OMP names for
@@ -290,7 +339,7 @@ function aliasSyntheticToolCalls(
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
   let attempts = 0;
-  let permissionRecoveries = 0;
+  let providerTransportRecoveries = 0;
   const guardOptions = options.guardOptions ?? {};
 
   const invoke = async (prompt: string): Promise<AgyRunResult> => {
@@ -298,15 +347,20 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     return options.invoke(prompt);
   };
 
-  const invokeRecoveringPermissionConversion = async (prompt: string): Promise<AgyRunResult> => {
+  const invokeRecoveringProviderTransport = async (prompt: string): Promise<AgyRunResult> => {
     let currentPrompt = prompt;
     while (true) {
       try {
         return await invoke(currentPrompt);
       } catch (error) {
-        if (!options.enforceToolless) throw error;
         const permissionTool = retryablePermissionConversionTool(error, guardOptions);
+        const invalidTaskId = retryableInvalidTaskId(error, guardOptions);
         const providerBoundaryDenied = retryableProviderBoundaryDenial(error, guardOptions);
+        const unknownProviderCapability = retryableUnknownProviderCapability(
+          error,
+          options.recipientAliases,
+          guardOptions,
+        );
         if (providerBoundaryDenied) {
           const recipient = blockedProviderMessageRecipient(error);
           const synthesized = recipient ? deterministicRecovery(error, recipient) : undefined;
@@ -315,15 +369,17 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
             return synthesized;
           }
         }
-        if (!permissionTool && !providerBoundaryDenied) throw error;
-        if (permissionRecoveries >= MAX_PERMISSION_CONVERSION_RECOVERIES) throw error;
+        if (!permissionTool && !invalidTaskId && !providerBoundaryDenied && !unknownProviderCapability) {
+          throw error;
+        }
+        if (providerTransportRecoveries >= MAX_PROVIDER_TRANSPORT_RECOVERIES) throw error;
 
         recordDiscardedUsage(error, discardedUsage);
-        permissionRecoveries += 1;
+        providerTransportRecoveries += 1;
         currentPrompt = appendPermissionConversionRecovery(
           prompt,
           permissionTool ? [permissionTool] : [],
-          permissionRecoveries,
+          providerTransportRecoveries,
         );
       }
     }
@@ -338,12 +394,12 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
       options.ompTools,
       recipient,
     );
-    return synthesized ? aliasSyntheticToolCalls(synthesized, options.recipientAliases) : undefined;
+    return synthesized ? encodeSyntheticHostResponse(synthesized, options.recipientAliases) : undefined;
   }
 
   let result: AgyRunResult;
   try {
-    result = await invokeRecoveringPermissionConversion(options.initialPrompt);
+    result = await invokeRecoveringProviderTransport(options.initialPrompt);
   } catch (error) {
     if (!options.enforceToolless) throw error;
 
@@ -357,7 +413,7 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     } else {
       const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
       try {
-        result = await invokeRecoveringPermissionConversion(correctedPrompt);
+        result = await invokeRecoveringProviderTransport(correctedPrompt);
       } catch (retryError) {
         const repeatedRecipient = retryableMissingAgyRecipient(retryError, guardOptions);
         if (!repeatedRecipient) throw retryError;
@@ -366,7 +422,7 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
         if (synthesizedRetry) {
           result = synthesizedRetry;
         } else {
-          result = await invokeRecoveringPermissionConversion(
+          result = await invokeRecoveringProviderTransport(
             appendFinalMissingRecipientCorrection(correctedPrompt, [missingRecipient, repeatedRecipient]),
           );
         }

@@ -173,9 +173,8 @@ export function createAgyProviderStream(
         }
 
         // OMP's toolChoice is a host-level semantic constraint. AGY has no
-        // native concept of OMP tools, so enforce it by narrowing the canonical
-        // OMP catalog, exposing only opaque aliases, and validating the restored
-        // OMP calls after the provider envelope is parsed.
+        // native concept of OMP actions, so enforce it by narrowing the catalog,
+        // assigning neutral wire IDs, and validating restored OMP calls.
         const toolChoice = resolveBridgeToolChoice(context.tools ?? [], options?.toolChoice);
         const promptResult = buildProviderPrompt(
           { ...context, tools: toolChoice.tools },
