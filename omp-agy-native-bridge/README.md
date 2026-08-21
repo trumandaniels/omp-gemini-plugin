@@ -100,22 +100,33 @@ Inside OMP:
 /model
 ```
 
-Choose `official-agy/auto`, or choose an exact `official-agy/<logical-gemini-id>` currently shown by OMP. For example, a current installation might expose:
+Choose `official-agy/auto`, or choose any exact model currently shown by OMP.
+For example, a current installation might expose:
 
 ```text
 official-agy/gemini-3.1-pro
 official-agy/gemini-3.7-flash
+official-agy/claude-sonnet-4-6
+official-agy/claude-opus-4-6-thinking
+official-agy/gpt-oss-120b-medium
 ```
 
-The thinking selector controls the exact AGY tier:
+For Gemini logical families, the thinking selector controls the exact AGY
+tier:
 
 - `off`, `minimal`, `low` → `...-low`
 - `medium` → `...-medium`
 - `high`, `xhigh`, `max` → `...-high`
 
-`auto` still omits `--model` and only forwards an explicit thinking level.
+Claude and OpenAI model entries use the exact slugs returned by `agy models`.
+Availability depends on the signed-in Antigravity account. `auto` still omits
+`--model` and only forwards an explicit thinking level.
 
-The extension always registers `auto`, synchronously runs `agy models` before provider registration, and registers the discovered slugs as an ordinary static model array for that OMP process. You may also pin or override entries in `.omp/agy-bridge.json`. Unknown pinned slugs fail loudly in official headless mode; they do not silently fall back.
+The extension always registers `auto`, synchronously runs `agy models` before
+provider registration, and registers all discovered Gemini, Claude, and OpenAI
+slugs as an ordinary static model array for that OMP process. You may also pin
+or override entries in `.omp/agy-bridge.json`. Unknown pinned slugs fail loudly
+in official headless mode; they do not silently fall back.
 
 Try a tool loop:
 
@@ -200,6 +211,11 @@ AGY_BRIDGE_DISCOVER_MODELS
 AGY_BRIDGE_INCLUDE_NON_GEMINI
 AGY_BRIDGE_PASSTHROUGH_ENV
 ```
+
+All supported model families are discovered by default. Set
+`includeNonGeminiModels: false` or `AGY_BRIDGE_INCLUDE_NON_GEMINI=false` to
+limit automatic discovery to Gemini models. Explicit entries in `models`
+remain available.
 
 By default, the child environment removes Gemini/Vertex routing variables and other credential-shaped environment variables before launching `agy`, while preserving normal process and Linux keyring/DBus plumbing. This reduces accidental credential leakage and makes account-backed mode less likely to switch to an API key. Set `sanitizeAccountEnvironment: false` only for a deliberate trusted deployment. To retain a specific variable, name it explicitly in comma-separated `AGY_BRIDGE_PASSTHROUGH_ENV`.
 

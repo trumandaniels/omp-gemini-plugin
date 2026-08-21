@@ -41,7 +41,7 @@ export const DEFAULT_CONFIG: BridgeConfig = {
   maxImageCount: 20,
   maxImageBytes: 50 * 1024 * 1024,
   discoverModels: true,
-  includeNonGeminiModels: false,
+  includeNonGeminiModels: true,
   discoveredContextWindow: 1_000_000,
   discoveredMaxTokens: 64_000,
   models: DEFAULT_MODELS,

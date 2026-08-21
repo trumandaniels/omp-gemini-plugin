@@ -7,6 +7,11 @@ test("default prompt budget is platform-independent after stdin transport", () =
   assert.equal(DEFAULT_CONFIG.maxPromptBytes, 1_500_000);
 });
 
+test("model discovery exposes every supported AGY family by default", () => {
+  assert.equal(DEFAULT_CONFIG.discoverModels, true);
+  assert.equal(DEFAULT_CONFIG.includeNonGeminiModels, true);
+});
+
 test("bridge config accepts capabilities.image on a model", () => {
   assert.doesNotThrow(() =>
     validateBridgeConfig({

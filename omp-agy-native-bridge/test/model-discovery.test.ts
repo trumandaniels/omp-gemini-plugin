@@ -19,11 +19,13 @@ MODEL                         DESCRIPTION
 * gemini-3.1-pro-high         Gemini Pro
   gemini-3.7-flash-medium     Fast
   claude-sonnet-4-6           Claude
+  gpt-oss-120b-medium        GPT-OSS
 `;
   assert.deepEqual(parseAgyModelsOutput(output), [
     "gemini-3.1-pro-high",
     "gemini-3.7-flash-medium",
     "claude-sonnet-4-6",
+    "gpt-oss-120b-medium",
   ]);
 });
 
@@ -75,7 +77,12 @@ test("discoverAgyModelsSync prefers the plain listing and sanitizes account-rout
       process.cwd(),
     );
     assert.equal(result.ok, true);
-    assert.deepEqual(result.models, ["gemini-3.1-pro-low", "gemini-3.1-pro-high"]);
+    assert.deepEqual(result.models, [
+      "gemini-3.1-pro-low",
+      "gemini-3.1-pro-high",
+      "claude-sonnet-4-6",
+      "gpt-oss-120b-medium",
+    ]);
   } finally {
     if (previous === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = previous;
@@ -91,7 +98,12 @@ test("discoverAgyModelsSync falls back to JSON only when plain output is unrecog
       process.cwd(),
     );
     assert.equal(result.ok, true);
-    assert.deepEqual(result.models, ["gemini-3.7-flash-low", "gemini-3.7-flash-high"]);
+    assert.deepEqual(result.models, [
+      "gemini-3.7-flash-low",
+      "gemini-3.7-flash-high",
+      "claude-sonnet-4-6",
+      "gpt-oss-120b-medium",
+    ]);
   } finally {
     if (previous === undefined) delete process.env.FAKE_AGY_MODELS_PLAIN_EMPTY;
     else process.env.FAKE_AGY_MODELS_PLAIN_EMPTY = previous;
@@ -165,7 +177,7 @@ test("mergeDiscoveredModels drops Gemini suffix IDs from returned logical IDs", 
   assert.equal(models.some((model) => /-(low|medium|high)$/.test(model.id)), false);
 });
 
-test("mergeDiscoveredModels keeps non-Gemini aliases filtered out by default", () => {
+test("mergeDiscoveredModels can disable non-Gemini aliases", () => {
   const models = mergeDiscoveredModels(
     DEFAULT_MODELS,
     {
@@ -182,20 +194,20 @@ test("mergeDiscoveredModels keeps non-Gemini aliases filtered out by default", (
   assert.ok(!ids.includes("claude-sonnet-4-6"));
 });
 
-test("mergeDiscoveredModels preserves explicit includeNonGeminiModels", () => {
+test("mergeDiscoveredModels exposes Claude and OpenAI routes by default", () => {
   const models = mergeDiscoveredModels(
     DEFAULT_MODELS,
     {
       ok: true,
-      models: ["gemini-3.1-pro-low", "claude-sonnet-4-6", "gpt-oss-120b"],
+      models: ["gemini-3.1-pro-low", "claude-sonnet-4-6", "gpt-oss-120b-medium"],
       stdout: "",
       stderr: "",
       status: 0,
     },
-    { ...DEFAULT_CONFIG, includeNonGeminiModels: true },
+    DEFAULT_CONFIG,
   );
   const ids = models.map((model) => model.id);
-  assert.deepEqual(ids, ["auto", "claude-sonnet-4-6", "gemini-3.1-pro", "gpt-oss-120b"]);
+  assert.deepEqual(ids, ["auto", "claude-sonnet-4-6", "gemini-3.1-pro", "gpt-oss-120b-medium"]);
 });
 
 test("configured raw Gemini suffix IDs collapse to logical entries", () => {

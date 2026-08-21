@@ -187,7 +187,7 @@ function runModelsCommand(
 export function discoverAgyModelsSync(
   config: Pick<BridgeConfig, "agyBinary"> & Partial<Pick<BridgeConfig, "sanitizeAccountEnvironment">>,
   cwd = process.cwd(),
-  timeoutMs = 10_000,
+  timeoutMs = 30_000,
 ): ModelDiscoveryResult {
   // Prefer the long-standing human-readable command. Current AGY builds in the
   // wild can reject `models --output-format json` even when nearby releases

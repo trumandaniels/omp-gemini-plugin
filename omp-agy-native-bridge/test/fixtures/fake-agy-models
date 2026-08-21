@@ -21,6 +21,8 @@ if (machineReadable) {
       models: [
         { id: "gemini-3.7-flash-low", displayName: "Gemini 3.7 Flash Low" },
         { model: "gemini-3.7-flash-high", displayName: "Gemini 3.7 Flash High" },
+        { slug: "claude-sonnet-4-6", displayName: "Claude Sonnet 4.6 (Thinking)" },
+        { id: "gpt-oss-120b-medium", displayName: "GPT-OSS 120B (Medium)" },
       ],
     }),
   );
@@ -41,3 +43,5 @@ if (process.env.FAKE_AGY_MODELS_PLAIN_EMPTY === "1") {
 console.log("Available models");
 console.log("* gemini-3.1-pro-low");
 console.log("  gemini-3.1-pro-high");
+console.log("  claude-sonnet-4-6");
+console.log("  gpt-oss-120b-medium");

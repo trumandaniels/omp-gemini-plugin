@@ -14,7 +14,7 @@
   "maxImageCount": 20,
   "maxImageBytes": 52428800,
   "discoverModels": true,
-  "includeNonGeminiModels": false,
+  "includeNonGeminiModels": true,
   "discoveredContextWindow": 1000000,
   "discoveredMaxTokens": 64000
 }
