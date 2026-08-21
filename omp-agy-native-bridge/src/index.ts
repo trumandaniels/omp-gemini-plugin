@@ -4,6 +4,7 @@ import type { Api } from "@oh-my-pi/pi-ai";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
 import { installAgentFile, installProviderSafetyHook } from "./agent-install.ts";
+import { fetchAgyQuota, formatAgyQuota } from "./agy-usage.ts";
 import { loadBridgeConfig } from "./config.ts";
 import { discoverAgyModelsSync, mergeDiscoveredModels } from "./model-discovery.ts";
 import { registerAgyDelegateTool } from "./delegate-tool.ts";
@@ -48,6 +49,19 @@ export default function officialAgyBridge(pi: ExtensionAPI): void {
       ctx.ui.notify(report.summary, report.ok ? "info" : "error");
     },
   });
+  pi.registerCommand("agy-usage", {
+    description: "Show remaining quota from the local official Antigravity account.",
+    handler: async (_args, ctx) => {
+      try {
+        const report = await fetchAgyQuota();
+        ctx.ui.notify(formatAgyQuota(report), "info");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui.notify(`Unable to read Antigravity quota: ${message}`, "error");
+      }
+    },
+  });
+
 
   pi.registerCommand("agy-install-agent", {
     description: "Install or update the global tool-less Antigravity agent used by provider mode.",
