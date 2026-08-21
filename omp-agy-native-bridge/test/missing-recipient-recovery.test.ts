@@ -211,7 +211,7 @@ test("failed send_message to subagent becomes an OMP batch task call", () => {
   });
 });
 
-test("failed send_message to a named missing agent becomes a named OMP task", () => {
+test("failed send_message to a named missing agent becomes an unnamed OMP task", () => {
   const result = synthesizeMissingRecipientRecovery(
     missingRecipientError("dummy", "Identify the running development server and report its URL."),
     "dummy",
@@ -227,7 +227,6 @@ test("failed send_message to a named missing agent becomes a named OMP task", ()
           context: "Delegated from the current parent OMP turn. Work in the current repository and complete the task exactly as requested.",
           tasks: [{
             task: "Identify the running development server and report its URL.",
-            name: "dummy",
           }],
         },
       },

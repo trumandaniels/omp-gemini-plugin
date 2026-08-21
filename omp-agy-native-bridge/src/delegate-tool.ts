@@ -1,9 +1,9 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
-import { runAgy } from "./agy/runner.ts";
+import { AgyRunError, runAgy } from "./agy/runner.ts";
 import { DelegateProgressCollector } from "./delegate-progress.ts";
 import { Semaphore } from "./semaphore.ts";
-import type { AgyEffort, BridgeConfig } from "./types.ts";
+import type { AgyEffort, AgyRunOptions, AgyRunResult, BridgeConfig } from "./types.ts";
 
 interface DelegateParams {
   prompt: string;
@@ -12,6 +12,67 @@ interface DelegateParams {
   agent?: string;
   conversation_id?: string;
   sandbox?: boolean;
+}
+
+const INVALID_TASK_ID_FAILURE = /^invalid task ID format:\s*"([^"\r\n]+)"\.?$/i;
+const DELEGATE_TASK_ID_INSTRUCTION = `# Antigravity task-ID safety
+If you use manage_task, first list the current tasks and pass only exact TaskId values returned by manage_task in this conversation. Never invent a task ID or use a placeholder such as "dummy".`;
+
+interface DelegateRunOutcome {
+  result: AgyRunResult;
+  recoveredInvalidTaskId?: string;
+}
+
+function invalidTaskIdRecovery(
+  error: unknown,
+): { conversationId: string; invalidTaskId: string } | undefined {
+  if (!(error instanceof AgyRunError)) return undefined;
+  if (error.terminal?.status !== "ERROR") return undefined;
+  const diagnostic = error.terminal.error;
+  if (typeof diagnostic !== "string") return undefined;
+  const match = INVALID_TASK_ID_FAILURE.exec(diagnostic.trim());
+  if (!match) return undefined;
+  const conversationId = error.terminal.conversation_id?.trim();
+  if (!conversationId) return undefined;
+  return { conversationId, invalidTaskId: match[1] };
+}
+
+function taskIdRecoveryPrompt(invalidTaskId: string): string {
+  return `# Mandatory task-ID correction
+The previous manage_task call was rejected because ${JSON.stringify(invalidTaskId)} is not a real task ID.
+- Continue from the current conversation state; do not replay work already completed.
+- Call manage_task with Action "list" before any status, kill, or send_input action.
+- Use only an exact TaskId returned by that list. Never invent or substitute a placeholder task ID.`;
+}
+
+/**
+ * Run one delegated AGY conversation. A model-generated placeholder task ID can
+ * terminate AGY before it can self-correct, so resume that exact conversation
+ * once with an explicit correction. Never replay the original delegated task.
+ */
+export async function runAgyDelegate(
+  options: AgyRunOptions,
+  invoke: (runOptions: AgyRunOptions) => Promise<AgyRunResult> = runAgy,
+): Promise<DelegateRunOutcome> {
+  try {
+    return {
+      result: await invoke({
+        ...options,
+        prompt: `${options.prompt}\n\n${DELEGATE_TASK_ID_INSTRUCTION}`,
+      }),
+    };
+  } catch (error) {
+    const recovery = invalidTaskIdRecovery(error);
+    if (!recovery) throw error;
+    return {
+      result: await invoke({
+        ...options,
+        prompt: taskIdRecoveryPrompt(recovery.invalidTaskId),
+        conversationId: recovery.conversationId,
+      }),
+      recoveredInvalidTaskId: recovery.invalidTaskId,
+    };
+  }
 }
 
 export function registerAgyDelegateTool(
@@ -46,7 +107,8 @@ export function registerAgyDelegateTool(
       const progress = new DelegateProgressCollector();
 
       try {
-        const result = await runAgy({
+
+        const outcome = await runAgyDelegate({
           prompt: params.prompt,
           cwd: ctx.cwd,
           binary: config.agyBinary,
@@ -68,6 +130,7 @@ export function registerAgyDelegateTool(
             }
           },
         });
+        const result = outcome.result;
         const summary = progress.summary();
 
         return {
@@ -78,6 +141,7 @@ export function registerAgyDelegateTool(
             durationSeconds: result.terminal.duration_seconds,
             usage: result.terminal.usage,
             tools: summary.tools,
+            recoveredInvalidTaskId: outcome.recoveredInvalidTaskId,
             subagents: summary.subagents,
             progress: {
               ...summary.progress,

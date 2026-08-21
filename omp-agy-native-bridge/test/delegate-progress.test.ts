@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { AgyRunError } from "../src/agy/runner.ts";
+import { runAgyDelegate } from "../src/delegate-tool.ts";
 import {
   DELEGATE_PROGRESS_LIMITS,
   DelegateProgressCollector,
 } from "../src/delegate-progress.ts";
-import type { AgyStepUpdateEvent } from "../src/types.ts";
+import type { AgyRunOptions, AgyRunResult, AgyStepUpdateEvent } from "../src/types.ts";
 
 function responseEvent(text: string): AgyStepUpdateEvent {
   return {
@@ -42,6 +44,33 @@ function toolEvent(
     },
   };
 }
+
+const runOptions: AgyRunOptions = {
+  prompt: "Inspect the requested files and report the result.",
+  cwd: "/workspace",
+  binary: "agy",
+  printTimeout: "5m",
+  hardTimeoutMs: 300_000,
+  sandbox: false,
+  maxPromptBytes: 1_000_000,
+  maxStderrBytes: 10_000,
+  killGraceMs: 1_000,
+  sanitizeAccountEnvironment: true,
+};
+
+const successfulRun: AgyRunResult = {
+  terminal: {
+    status: "SUCCESS",
+    conversation_id: "conversation-real",
+    response: "done",
+  },
+  events: [],
+  stderr: "",
+  exitCode: 0,
+  signalCode: null,
+  toolSteps: [],
+  subagents: [],
+};
 
 test("DelegateProgressCollector keeps a bounded response tail", () => {
   const collector = new DelegateProgressCollector();
@@ -128,4 +157,50 @@ test("DelegateProgressCollector deduplicates and bounds subagent metadata", () =
   assert.equal(summary.subagents.length, DELEGATE_PROGRESS_LIMITS.subagents);
   assert.equal(summary.progress.omittedSubagents, 2);
   assert.equal(summary.subagents[0]?.conversation_id, "child-1");
+});
+
+test("runAgyDelegate resumes the same conversation after a placeholder task ID failure", async () => {
+  const calls: AgyRunOptions[] = [];
+  const outcome = await runAgyDelegate(runOptions, async (options) => {
+    calls.push(options);
+    if (calls.length === 1) {
+      throw new AgyRunError('agy failed: invalid task ID format: "dummy"', {
+        status: "ERROR",
+        terminal: {
+          status: "ERROR",
+          conversation_id: "conversation-real",
+          error: 'invalid task ID format: "dummy"',
+        },
+      });
+    }
+    return successfulRun;
+  });
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[0]?.prompt ?? "", /Never invent a task ID/);
+  assert.equal(calls[1]?.conversationId, "conversation-real");
+  assert.match(calls[1]?.prompt ?? "", /"dummy" is not a real task ID/);
+  assert.match(calls[1]?.prompt ?? "", /do not replay work already completed/);
+  assert.equal(outcome.recoveredInvalidTaskId, "dummy");
+  assert.equal(outcome.result, successfulRun);
+});
+
+test("runAgyDelegate does not replay work when the failed conversation cannot be resumed", async () => {
+  let calls = 0;
+  const failure = new AgyRunError('agy failed: invalid task ID format: "dummy"', {
+    status: "ERROR",
+    terminal: {
+      status: "ERROR",
+      error: 'invalid task ID format: "dummy"',
+    },
+  });
+
+  await assert.rejects(
+    runAgyDelegate(runOptions, async () => {
+      calls += 1;
+      throw failure;
+    }),
+    (error: unknown) => error === failure,
+  );
+  assert.equal(calls, 1);
 });

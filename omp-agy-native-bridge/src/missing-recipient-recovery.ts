@@ -124,7 +124,6 @@ function requiredKeys(schema: Record<string, unknown>): Set<string> {
 function taskArguments(
   tool: SerializedTool,
   task: string,
-  recipientName?: string,
 ): Record<string, unknown> | undefined {
   const properties = schemaProperties(tool);
   if (!properties) return undefined;
@@ -153,9 +152,6 @@ function taskArguments(
     }
 
     const item: Record<string, unknown> = { task };
-    if (recipientName && Object.prototype.hasOwnProperty.call(itemProperties, "name")) {
-      item.name = recipientName;
-    }
     const args: Record<string, unknown> = {
       tasks: [item],
     };
@@ -171,9 +167,6 @@ function taskArguments(
       if (key !== "task") return undefined;
     }
     const args: Record<string, unknown> = { task };
-    if (recipientName && Object.prototype.hasOwnProperty.call(properties, "name")) {
-      args.name = recipientName;
-    }
     return args;
   }
 
@@ -260,7 +253,8 @@ function structuredToolReturn(
  *   that exact tool;
  * - recipient task, a generic agent/subagent role, or a named missing agent +
  *   one substantive failed message => an OMP task tool call using the exact
- *   live OMP task schema.
+ *   live OMP task schema. Missing AGY recipient labels are not valid OMP agent
+ *   names and are therefore never forwarded as task identifiers.
  */
 export function synthesizeMissingRecipientRecovery(
   error: unknown,
@@ -292,11 +286,7 @@ export function synthesizeMissingRecipientRecovery(
 
   const taskTool = tools.find((tool) => normalizedToken(tool.name) === "task");
   if (!taskTool) return undefined;
-  const args = taskArguments(
-    taskTool,
-    message,
-    isNamedAgent && !isSubagentRole ? recipient : undefined,
-  );
+  const args = taskArguments(taskTool, message);
   if (!args) return undefined;
 
   return syntheticResult({
