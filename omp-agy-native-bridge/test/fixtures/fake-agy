@@ -47,6 +47,7 @@ console.log(
       cwd: process.cwd(),
       tools: [],
       permission_mode: "request-review",
+      add_dirs: args.flatMap((arg, index) => arg === "--add-dir" ? [args[index + 1]] : []),
       model: args.includes("--model") ? args[args.indexOf("--model") + 1] : "default",
       agent: args.includes("--agent") ? args[args.indexOf("--agent") + 1] : "default",
     },

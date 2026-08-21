@@ -182,11 +182,12 @@ The raw OMP image block is not placed into the textual history. Instead:
 
 1. `media.ts` scans image blocks in canonical message order.
 2. It validates supported media types, count, aggregate decoded size, and base64/binary shape.
-3. It writes mode-`0600` files under a fresh mode-`0700` `.omp-agy-media-*` directory in the request workspace.
-4. `messages.ts` replaces each raw image with a numbered `image_attachment` placeholder.
-5. `prompt.ts` adds matching AGY `@./...` file mentions under a dedicated prompt-media section.
-6. The tool-less bridge agent may interpret only those explicit media attachments; it still cannot invoke file tools.
-7. Provider cleanup removes the directory after success, failure, or cancellation.
+3. It writes mode-`0600` files under a fresh mode-`0700` `omp-agy-media-*` operating-system temporary directory.
+4. `runner.ts` adds only that isolated directory to the AGY workspace for the current process.
+5. `messages.ts` replaces each raw image with a numbered `image_attachment` placeholder.
+6. `prompt.ts` adds matching absolute AGY `@file` mentions under a dedicated prompt-media section.
+7. The tool-less bridge agent may interpret only those explicit media attachments; it still cannot invoke unrelated file tools.
+8. Provider cleanup removes the directory after success, failure, or cancellation.
 
 `official-agy/auto` is not inferred as multimodal because provider registration cannot know the account-selected model behind it. It must be explicitly marked when the operator knows that route is image-capable.
 
@@ -236,10 +237,10 @@ Delegate mode can display incremental `agent_response`, tool, and subagent summa
 Each provider turn:
 
 1. resolves the logical model and its image capability;
-2. validates and stages any OMP image inputs inside the request workspace;
-3. writes a temporary response schema;
-4. passes the reconstructed prompt using `agy -p <prompt>`;
-5. ignores stdin so the child cannot stall waiting for input;
+2. validates and stages any OMP image inputs in an isolated operating-system temporary directory;
+3. adds that media directory to the AGY workspace for the process;
+4. writes a temporary response schema;
+5. sends the reconstructed prompt through the child process's standard input;
 6. parses only stdout NDJSON;
 7. retains bounded stderr diagnostics;
 8. forwards cancellation with `SIGTERM`, then `SIGKILL` after a grace period;

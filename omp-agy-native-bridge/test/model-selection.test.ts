@@ -85,7 +85,7 @@ test("pro medium falls back deterministically to low", () => {
   assert.deepEqual(selected, { model: "gemini-3.7-flash-low", effort: undefined });
 });
 
-test("auto omits model and forwards selected effort", () => {
+test("auto omits effort because it can resolve to a non-Gemini model", () => {
   const selected = resolveAgyModelSelection(
     {
       id: "auto",
@@ -97,7 +97,7 @@ test("auto omits model and forwards selected effort", () => {
     },
     { reasoning: "high" },
   );
-  assert.deepEqual(selected, { model: undefined, effort: "high" });
+  assert.deepEqual(selected, { model: undefined, effort: undefined });
 });
 
 test("auto forwards undefined effort when no effort is selected", () => {
@@ -160,37 +160,56 @@ test("unknown reasoning string does not crash", () => {
   assert.equal(selected.effort, undefined);
 });
 
-test("direct non-tiered model uses configured slug", () => {
+test("direct Gemini model forwards explicit effort", () => {
   const selected = resolveAgyModelSelection(
     {
-      id: "non-tier",
-      name: "Direct",
+      id: "gemini-direct",
+      name: "Direct Gemini",
       reasoning: true,
       contextWindow: 100,
       maxTokens: 100,
-      agyModelId: "other-model",
+      agyModelId: "gemini-3-flash",
       effort: "medium",
     },
     { reasoning: "high" },
   );
-  assert.deepEqual(selected, { model: "other-model", effort: "high" });
+  assert.deepEqual(selected, { model: "gemini-3-flash", effort: "high" });
 });
 
-test("direct non-tiered model honors bridge defaultEffort", () => {
+test("direct Gemini model honors bridge defaultEffort", () => {
   const selected = resolveAgyModelSelection(
     {
-      id: "non-tier",
-      name: "Direct",
+      id: "gemini-direct",
+      name: "Direct Gemini",
       reasoning: true,
       contextWindow: 100,
       maxTokens: 100,
-      agyModelId: "other-model",
+      agyModelId: "gemini-3-flash",
     },
     {},
     "medium",
   );
-  assert.deepEqual(selected, { model: "other-model", effort: "medium" });
+  assert.deepEqual(selected, { model: "gemini-3-flash", effort: "medium" });
 });
+
+for (const modelId of ["claude-sonnet-4-6", "gpt-oss-120b-medium", "future-reasoning-model"]) {
+  test(`direct non-Gemini model ${modelId} never receives an effort flag`, () => {
+    const selected = resolveAgyModelSelection(
+      {
+        id: modelId,
+        name: modelId,
+        reasoning: true,
+        contextWindow: 100,
+        maxTokens: 100,
+        agyModelId: modelId,
+        effort: "low",
+      },
+      { reasoning: "high" },
+      "medium",
+    );
+    assert.deepEqual(selected, { model: modelId, effort: undefined });
+  });
+}
 
 test("direct non-reasoning model never receives an effort flag", () => {
   const selected = resolveAgyModelSelection(

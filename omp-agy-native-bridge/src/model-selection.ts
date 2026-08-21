@@ -49,6 +49,10 @@ function pickTierRoute(
   throw new Error(`No usable AGY route found for effort ${requested}`);
 }
 
+function supportsAgyEffortFlag(modelId: string): boolean {
+  return /^gemini(?:[-_.:/]|$)/i.test(modelId);
+}
+
 export function resolveAgyModelSelection(
   model: BridgeModelDefinition,
   options: {
@@ -60,13 +64,9 @@ export function resolveAgyModelSelection(
   const normalizedEffort = options?.disableReasoning === true ? "low" : normalizeReasoning(options?.reasoning);
 
   if (model.id === "auto") {
-    // A custom auto entry may explicitly advertise no reasoning. In that case
-    // never forward --effort: some AGY routes reject effort on non-reasoning
-    // models, and OMP already exposes no thinking control for this model.
-    const effort = model.reasoning
-      ? normalizedEffort ?? model.effort ?? defaultEffort
-      : undefined;
-    return { model: undefined, effort };
+    // Auto can resolve to a non-Gemini model. AGY rejects --effort for those
+    // routes, so the bridge cannot safely forward a family-specific flag.
+    return { model: undefined, effort: undefined };
   }
 
   if (model.agyModelIdsByEffort !== undefined) {
@@ -81,14 +81,15 @@ export function resolveAgyModelSelection(
     return { model: route, effort: undefined };
   }
 
-  // Direct AGY model slugs support the CLI's --effort flag only when this model
-  // is reasoning-capable. Apply the bridge-wide default just as we do for auto
-  // and tiered models, but never leak a global effort into a non-reasoning route.
-  const effort = model.reasoning
+  // AGY currently accepts --effort only for direct Gemini routes. Claude,
+  // GPT-OSS, and future non-Gemini families can still reason, but their model
+  // selection fails if it is paired with this Gemini-specific CLI flag.
+  const directModelId = model.agyModelId ?? model.id;
+  const effort = model.reasoning && supportsAgyEffortFlag(directModelId)
     ? normalizedEffort ?? model.effort ?? defaultEffort
     : undefined;
   return {
-    model: model.agyModelId ?? model.id,
+    model: directModelId,
     effort,
   };
 }

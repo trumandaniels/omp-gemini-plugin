@@ -237,9 +237,18 @@ For a custom or pinned model entry, explicitly mark image support in `agy-bridge
 
 `supportsImages: true` is an equivalent bridge-native override. After editing either OMP or bridge configuration, fully restart OMP; provider metadata is registered at process startup.
 
+## AGY rejects `--effort` for a Claude or OpenAI model
+
+AGY accepts `--effort` only for direct Gemini routes. The bridge therefore omits
+the flag for Claude, OpenAI, other non-Gemini model families, and `auto`.
+
+Upgrade or relink the bridge if an error reports an invalid selection such as
+`--model "claude-..." --effort "medium"`. Fully restart OMP after updating the
+plugin so the provider loads the corrected model-selection logic.
+
 ## The model is marked vision-capable but the screenshot is not understood
 
-The bridge transports OMP image blocks by writing private temporary files under `.omp-agy-media-*` in the request workspace and adding AGY `@file` media mentions to the headless prompt.
+The bridge writes OMP image blocks as private files under an `omp-agy-media-*` operating-system temporary directory. It adds that directory to the current AGY process with `--add-dir` and uses absolute AGY `@file` media mentions in the headless prompt.
 
 Check, in order:
 
@@ -262,11 +271,7 @@ agy -p "Describe @./test.png in one sentence." --output-format json --print-time
 
 If that direct command cannot see the image, the bridge cannot repair the installed CLI's headless media behavior. Upgrade `agy` or configure another OMP-native vision provider for `modelRoles.vision`.
 
-A force-killed process or host crash can leave `.omp-agy-media-*` behind. Remove stale directories only after confirming no bridge process is active:
-
-```bash
-find . -maxdepth 1 -type d -name '.omp-agy-media-*' -print
-```
+A force-killed process or host crash can leave an `omp-agy-media-*` directory under the operating-system temporary directory. Remove a stale directory only after confirming that no bridge process is using it.
 
 ## Prompt exceeds `AGY_BRIDGE_MAX_PROMPT_BYTES`
 

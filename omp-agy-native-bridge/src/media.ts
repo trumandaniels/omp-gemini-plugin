@@ -1,5 +1,6 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { resolve, sep } from "node:path";
 
 const IMAGE_MEDIA_TYPES = new Map<string, { normalized: string; extension: string }>([
   ["image/png", { normalized: "image/png", extension: "png" }],
@@ -34,6 +35,7 @@ export interface StagedBridgeImage {
 
 export interface StagedBridgeImages {
   attachments: StagedBridgeImage[];
+  workspaceDirectory?: string;
   cleanup(): Promise<void>;
 }
 
@@ -125,21 +127,18 @@ function collectBridgeImages(
   });
 }
 
-function toPromptPath(cwd: string, absolutePath: string): string {
-  const value = relative(cwd, absolutePath).split(sep).join("/");
-  return value.startsWith("./") ? value : `./${value}`;
+function toPromptPath(absolutePath: string): string {
+  return absolutePath.split(sep).join("/");
 }
 
 export async function stageBridgeImages(
   context: { messages?: readonly unknown[] },
-  cwd: string,
   limits: { maxImageCount: number; maxImageBytes: number },
 ): Promise<StagedBridgeImages> {
   const images = collectBridgeImages(context, limits);
   if (images.length === 0) return { attachments: [], cleanup: async () => {} };
 
-  const resolvedCwd = resolve(cwd);
-  const directory = await mkdtemp(`${resolvedCwd}${sep}.omp-agy-media-`);
+  const directory = await mkdtemp(resolve(tmpdir(), "omp-agy-media-"));
   await chmod(directory, 0o700);
   try {
     const attachments: StagedBridgeImage[] = [];
@@ -153,11 +152,12 @@ export async function stageBridgeImages(
         mediaType: image.mediaType,
         sizeBytes: image.bytes.length,
         absolutePath,
-        promptPath: toPromptPath(resolvedCwd, absolutePath),
+        promptPath: toPromptPath(absolutePath),
       });
     }
     return {
       attachments,
+      workspaceDirectory: directory,
       cleanup: async () => {
         await rm(directory, { recursive: true, force: true });
       },

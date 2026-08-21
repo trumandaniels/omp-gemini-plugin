@@ -119,8 +119,9 @@ tier:
 - `high`, `xhigh`, `max` → `...-high`
 
 Claude and OpenAI model entries use the exact slugs returned by `agy models`.
-Availability depends on the signed-in Antigravity account. `auto` still omits
-`--model` and only forwards an explicit thinking level.
+Availability depends on the signed-in Antigravity account. The bridge passes
+`--effort` only for direct Gemini routes; Claude, OpenAI, and `auto` omit it
+because AGY rejects effort/model combinations that can resolve outside Gemini.
 
 The extension always registers `auto`, synchronously runs `agy models` before
 provider registration, and registers all discovered Gemini, Claude, and OpenAI
@@ -154,10 +155,11 @@ modelRoles:
 For each provider turn containing image blocks, the bridge:
 
 1. validates the media type, count, and aggregate decoded size;
-2. writes private temporary image files inside the request workspace;
-3. maps the conversation's image blocks to numbered placeholders;
-4. adds normal AGY `@file` media mentions to the headless prompt;
-5. removes the temporary directory after the AGY process finishes.
+2. writes private temporary image files in the operating-system temporary directory;
+3. adds that isolated directory to the AGY workspace for the current process;
+4. maps the conversation's image blocks to numbered placeholders;
+5. adds normal AGY `@file` media mentions to the headless prompt;
+6. removes the temporary directory after the AGY process finishes.
 
 The raw base64 image bytes are never inserted into the model's textual conversation transcript.
 

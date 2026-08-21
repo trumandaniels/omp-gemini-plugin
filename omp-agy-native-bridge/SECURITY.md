@@ -91,9 +91,9 @@ A production hardening pass should replace the denylist with a tested explicit a
 
 Every provider run writes the JSON response schema into a fresh operating-system temporary directory. It does not write the textual prompt or tokens to disk. The directory is removed in `finally`.
 
-When a turn contains OMP image blocks, the bridge additionally decodes only the allowed image media types into a fresh `.omp-agy-media-*` directory inside the active request workspace. The directory is created with mode `0700`, files are created with mode `0600`, configured count/aggregate-byte ceilings are enforced before launch, and cleanup runs after the AGY process exits. Raw base64 is excluded from the serialized conversation.
+When a turn contains OMP image blocks, the bridge additionally decodes only the allowed image media types into a fresh `omp-agy-media-*` operating-system temporary directory. The directory is created with mode `0700`, files are created with mode `0600`, configured count/aggregate-byte ceilings are enforced before launch, and cleanup runs after the AGY process exits. The bridge exposes only that isolated directory to AGY with `--add-dir`; it does not mutate the active request workspace. Raw base64 is excluded from the serialized conversation.
 
-A hard process or host crash can bypass JavaScript cleanup and leave that hidden directory behind. Treat the workspace as containing sensitive user inputs and remove stale `.omp-agy-media-*` directories before sharing or archiving it. Disable this transport with `enableImageInput: false` when temporary workspace media is unacceptable.
+A hard process or host crash can bypass JavaScript cleanup and leave that temporary directory behind. Treat the host temporary directory as potentially containing sensitive user inputs. Disable this transport with `enableImageInput: false` when temporary media files are unacceptable.
 
 OMP itself may persist conversation histories containing user prompts and tool results according to normal OMP settings.
 

@@ -154,6 +154,9 @@ export async function runAgy(options: AgyRunOptions): Promise<AgyRunResult> {
     // Current AGY print mode consumes a non-TTY stdin prompt when no -p/--print
     // prompt value is supplied, which also keeps prompt contents out of ps output.
     const args = ["--output-format", "stream-json"];
+    for (const directory of options.additionalWorkspaceDirectories ?? []) {
+      args.push("--add-dir", directory);
+    }
     if (schemaPath) args.push("--json-schema", schemaPath);
     if (options.model) args.push("--model", options.model);
     if (options.effort) args.push("--effort", options.effort);

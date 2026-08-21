@@ -137,6 +137,8 @@ export interface AgyRunOptions {
   maxStderrBytes: number;
   killGraceMs: number;
   sanitizeAccountEnvironment: boolean;
+  /** Additional isolated directories that AGY may resolve explicit prompt attachments from. */
+  additionalWorkspaceDirectories?: readonly string[];
   /** Enables the installed pre-tool safety boundary for a provider-mode process only. */
   providerBoundary?: {
     allowedMediaPaths?: readonly string[];

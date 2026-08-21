@@ -166,7 +166,7 @@ export function createAgyProviderStream(
               `official-agy/${selected.id} is not configured for image input. Select an explicit Gemini logical model or set models[].capabilities.image=true in agy-bridge.json.`,
             );
           }
-          stagedImages = await stageBridgeImages(context, requestCwd, {
+          stagedImages = await stageBridgeImages(context, {
             maxImageCount: config.maxImageCount,
             maxImageBytes: config.maxImageBytes,
           });
@@ -225,6 +225,9 @@ export function createAgyProviderStream(
             maxStderrBytes: config.maxStderrBytes,
             killGraceMs: config.killGraceMs,
             sanitizeAccountEnvironment: config.sanitizeAccountEnvironment,
+            additionalWorkspaceDirectories: stagedImages?.workspaceDirectory
+              ? [stagedImages.workspaceDirectory]
+              : [],
             providerBoundary: {
               allowedMediaPaths: stagedImages?.attachments.map((attachment) => attachment.absolutePath) ?? [],
             },

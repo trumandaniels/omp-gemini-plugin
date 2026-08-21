@@ -43,6 +43,20 @@ test("runAgy parses official stream-json shape", async () => {
   assert.equal(result.eventCount, 3);
 });
 
+test("runAgy adds isolated attachment directories to the AGY workspace", async () => {
+  const result = await runAgy({
+    ...baseRunOptions("hello"),
+    additionalWorkspaceDirectories: ["/tmp/omp-agy-media-example"],
+  });
+  const init = result.events[0];
+  assert.equal(init?.event, "init");
+  if (init?.event !== "init") assert.fail("expected init event");
+  assert.deepEqual(
+    (init.init as typeof init.init & { add_dirs?: string[] }).add_dirs,
+    ["/tmp/omp-agy-media-example"],
+  );
+});
+
 test("runAgy tolerates an exact duplicate terminal result", async () => {
   const result = await runAgy(baseRunOptions("FAKE:DUPLICATE_RESULT"));
   assert.equal(result.terminal.status, "SUCCESS");
