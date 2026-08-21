@@ -27,6 +27,18 @@ test("explicit passthrough can retain a named secret", () => {
   assert.equal(output.SPECIAL_API_KEY, "allowed-by-user");
 });
 
+test("nested delegates do not inherit provider-only boundary flags", () => {
+  const output = buildAgyEnvironment(true, {
+    PATH: "/bin",
+    AGY_BRIDGE_PASSTHROUGH_ENV: "OMP_AGY_PROVIDER_MODE,OMP_AGY_PROVIDER_MEDIA_PATHS",
+    OMP_AGY_PROVIDER_MODE: "1",
+    OMP_AGY_PROVIDER_MEDIA_PATHS: '["/tmp/provider-image.png"]',
+  });
+  assert.equal(output.PATH, "/bin");
+  assert.equal(output.OMP_AGY_PROVIDER_MODE, undefined);
+  assert.equal(output.OMP_AGY_PROVIDER_MEDIA_PATHS, undefined);
+});
+
 test("provider boundary overrides cannot be disabled by the parent environment", () => {
   const output = buildAgyEnvironment(
     true,
