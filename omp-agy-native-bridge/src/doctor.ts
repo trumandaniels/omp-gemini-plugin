@@ -11,6 +11,7 @@ import { buildAgyEnvironment } from "./env.ts";
 import {
   providerHarnessActivitySummary,
   providerHarnessSnapshotsComplete,
+  retryableProviderControlToolNames,
   unexpectedProviderHarnessToolSteps,
 } from "./harness-guard.ts";
 import { discoverAgyModelsSync } from "./model-discovery.ts";
@@ -308,13 +309,16 @@ export async function runDoctor(
         const result = outcome.result;
         const output = parseAgyTerminalOutput(result.terminal, []);
         const safeHarness = providerHarnessSnapshotsComplete(result)
-          && unexpectedProviderHarnessToolSteps(result.toolSteps, { cwd }).length === 0
-          && (result.subagentCount ?? result.subagents.length) === 0;
+          && (result.subagentCount ?? result.subagents.length) === 0
+          && (
+            unexpectedProviderHarnessToolSteps(result.toolSteps, { cwd }).length === 0
+            || retryableProviderControlToolNames(result.toolSteps, { cwd }) !== undefined
+          );
         checks.push({
           name: "live provider transport",
           ok: output.text.trim().split(/\r?\n/, 1)[0] === "READY" && safeHarness,
           detail: safeHarness
-            ? `structured output=${JSON.stringify(output)}`
+            ? `provider attempts=${outcome.attempts}; structured output=${JSON.stringify(output)}`
             : `unexpected or incompletely captured inner harness activity: ${providerHarnessActivitySummary(result)}`,
         });
       } catch (error) {

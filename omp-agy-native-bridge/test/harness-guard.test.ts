@@ -90,15 +90,14 @@ test("provider guard rejects a marker on an incomplete ACTIVE lifecycle", () => 
   );
 });
 
-test("retryableProviderControlToolNames accepts harmless probes and provider-local planning", () => {
+test("retryableProviderControlToolNames accepts only harmless status probes", () => {
   assert.deepEqual(
     retryableProviderControlToolNames([
       toolEvent("ACTIVE", 1, "manage_subagents", { Action: "list" }),
       toolEvent("DONE", 1, "manage_subagents", { Action: "list" }),
       toolEvent("DONE", 2, "manage_task", { action: "status", TaskId: "task-1" }),
-      toolEvent("DONE", 3, "schedule", { tasks: [{ description: "Inspect the repository" }] }),
     ]),
-    ["manage_subagents", "manage_task", "schedule"],
+    ["manage_subagents", "manage_task"],
   );
 });
 
@@ -107,6 +106,7 @@ test("retryableProviderControlToolNames rejects mutating AGY control actions", (
     toolEvent("DONE", 1, "manage_subagents", { Action: "kill_all" }),
     toolEvent("DONE", 1, "manage_task", { Action: "kill", TaskId: "task-1" }),
     toolEvent("DONE", 1, "manage_task", { Action: "send_input", TaskId: "task-1", Input: "x" }),
+    toolEvent("DONE", 1, "schedule", { Prompt: "Inspect the repository" }),
     toolEvent("DONE", 1, "define_subagent", { name: "Worker" }),
     toolEvent("DONE", 1, "invoke_subagent", { Subagents: [] }),
   ]) {

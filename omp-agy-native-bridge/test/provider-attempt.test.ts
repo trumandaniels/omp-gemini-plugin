@@ -334,9 +334,8 @@ test("runProviderAttempts never performs a fourth AGY attempt after repeated mis
   assert.equal(calls, 3);
 });
 
-test("runProviderAttempts retries a successful read-only AGY control probe once", async () => {
+test("runProviderAttempts returns a complete read-only probe result without retrying", async () => {
   let calls = 0;
-  const prompts: string[] = [];
   const listEvent: AgyStepUpdateEvent = {
     event: "step_update",
     step_update: {
@@ -353,18 +352,18 @@ test("runProviderAttempts retries a successful read-only AGY control probe once"
     initialPrompt: "prompt",
     enforceToolless: true,
     agentName: "omp-bridge-model",
-    invoke: async (prompt) => {
-      prompts.push(prompt);
+    invoke: async () => {
       calls += 1;
-      return calls === 1 ? successfulResult([listEvent]) : successfulResult();
+      return successfulResult([listEvent]);
     },
   });
 
-  assert.equal(outcome.attempts, 2);
-  assert.equal(outcome.discardedUsage.length, 1);
-  assert.doesNotMatch(prompts[1] ?? "", /manage_subagents/i);
-  assert.match(prompts[1] ?? "", /internal Antigravity action/i);
+  assert.equal(calls, 1);
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.result.terminal.status, "SUCCESS");
+  assert.equal(outcome.discardedUsage.length, 0);
 });
+
 
 test("runProviderAttempts does not retry a control probe from a truncated snapshot", async () => {
   let calls = 0;

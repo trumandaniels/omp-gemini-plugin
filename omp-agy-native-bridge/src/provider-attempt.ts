@@ -290,7 +290,6 @@ function aliasSyntheticToolCalls(
 export async function runProviderAttempts(options: ProviderAttemptOptions): Promise<ProviderAttemptOutcome> {
   const discardedUsage: AgyUsage[] = [];
   let attempts = 0;
-  let retried = false;
   let permissionRecoveries = 0;
   const guardOptions = options.guardOptions ?? {};
 
@@ -356,7 +355,6 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     if (synthesized) {
       result = synthesized;
     } else {
-      retried = true;
       const correctedPrompt = appendMissingAgyRecipientRetryInstruction(options.initialPrompt, missingRecipient);
       try {
         result = await invokeRecoveringPermissionConversion(correctedPrompt);
@@ -377,19 +375,14 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   }
 
   if (options.enforceToolless) {
-    const retryTools = result.subagents.length === 0 && providerHarnessSnapshotsComplete(result)
+    const safeProbeTools = result.subagents.length === 0 && providerHarnessSnapshotsComplete(result)
       ? retryableProviderControlToolNames(result.toolSteps, guardOptions)
       : undefined;
 
-    if (retryTools && !retried) {
-      if (result.terminal.usage) discardedUsage.push(result.terminal.usage);
-      retried = true;
-      result = await invokeRecoveringPermissionConversion(
-        appendProviderHarnessRetryInstruction(options.initialPrompt, retryTools),
-      );
-    }
-
-    assertProviderHarnessIsToolless(result, options.agentName, guardOptions);
+    // Read-only status probes are permitted to finish in the same AGY process.
+    // Do not discard a complete terminal response or spend another model call
+    // merely to make an otherwise safe provider trajectory perfectly tool-less.
+    if (!safeProbeTools) assertProviderHarnessIsToolless(result, options.agentName, guardOptions);
   }
 
   return { result, discardedUsage, attempts };

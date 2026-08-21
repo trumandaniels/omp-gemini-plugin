@@ -135,16 +135,15 @@ function toolAction(event: AgyStepUpdateEvent): string | undefined {
   return undefined;
 }
 
-const RETRYABLE_CONTROL_ACTIONS = new Map<string, ReadonlySet<string>>([
-  ["managetask", new Set(["list", "status"])],
-  ["managesubagents", new Set(["list"])],
-]);
-const RETRYABLE_PROVIDER_PLANNING_TOOLS: Record<string, true> = { schedule: true };
+const RETRYABLE_CONTROL_ACTIONS: Record<string, Readonly<Record<string, true>>> = {
+  managetask: { list: true, status: true },
+  managesubagents: { list: true },
+};
 
 /**
  * Return AGY control activity that a corrected provider attempt may discard.
- * Read-only status probes and provider-local planning do not touch the workspace
- * or invoke a subagent. Mutating task controls never qualify.
+ * Only read-only status probes qualify; mutating task controls, scheduling, and
+ * subagent operations never qualify.
  */
 export function retryableProviderControlToolNames(
   events: readonly AgyStepUpdateEvent[],
@@ -154,10 +153,8 @@ export function retryableProviderControlToolNames(
   if (unexpected.length === 0) return undefined;
   for (const event of unexpected) {
     const name = normalizedToolName(toolStepName(event));
-    if (RETRYABLE_PROVIDER_PLANNING_TOOLS[name]) continue;
-    const allowedActions = RETRYABLE_CONTROL_ACTIONS.get(name);
     const action = toolAction(event);
-    if (!allowedActions || !action || !allowedActions.has(action)) return undefined;
+    if (!action || !RETRYABLE_CONTROL_ACTIONS[name]?.[action]) return undefined;
   }
   return [...new Set(unexpected.map(toolStepName))].sort((left, right) => left.localeCompare(right));
 }

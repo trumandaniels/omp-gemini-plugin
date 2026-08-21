@@ -33,6 +33,9 @@ test("provider hook allows only side-effect-free control probes", () => {
   for (const [name, args] of [
     ["send_message", { Recipient: "omp", Message: "continue" }],
     ["manage_task", { Action: "kill", TaskId: "task-1" }],
+    ["manage_task", { Action: "send_input", TaskId: "task-1", Input: "continue" }],
+    ["schedule", { DurationSeconds: 30, Prompt: "continue" }],
+    ["define_subagent", { name: "worker" }],
     ["invoke_subagent", {}],
     ["run_command", {}],
   ] as const) {
