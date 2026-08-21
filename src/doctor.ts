@@ -225,7 +225,7 @@ export async function runDoctor(
       ok: agentCurrent,
       detail: agentCurrent
         ? "installed agent matches the bundled isolated definition"
-        : "installed agent is stale or customized; run /agy-install-agent (or npm run install-agent -- --force), then fully restart OMP",
+        : "installed agent is stale or customized; run /agy-install-agent (or sfw-npm run install-agent -- --force), then fully restart OMP",
     });
   }
 
@@ -238,7 +238,7 @@ export async function runDoctor(
       ok: providerBoundaryCurrent,
       detail: providerBoundaryCurrent
         ? `installed and registered through ${status.hooksPath}`
-        : `missing or stale (${status.scriptPath}; ${status.hooksPath}); run /agy-install-agent (or npm run install-agent -- --force), then fully restart OMP`,
+        : `missing or stale (${status.scriptPath}; ${status.hooksPath}); run /agy-install-agent (or sfw-npm run install-agent -- --force), then fully restart OMP`,
     });
   }
 

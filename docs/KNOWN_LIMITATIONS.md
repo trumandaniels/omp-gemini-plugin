@@ -12,11 +12,11 @@ The official CLI applies `--json-schema` to the terminal result. Native OMP text
 
 Provider calls are stateless. OMP's bounded context is serialized for every model turn. This is correct for OMP branch semantics but expensive. Image blocks retained in history are staged again on later turns, subject to the configured count and aggregate-byte limits.
 
-## Prompt travels through argv
+## Prompt transport is process-bound
 
-The CLI exposes `-p/--prompt`; this prototype therefore passes the prompt as one child-process argument. Linux/WSL allows substantially more than native Windows. Large histories must be compacted.
+The runner sends the reconstructed OMP context through the official CLI's non-TTY stdin prompt rather than placing it in argv. This avoids host argument-size limits, but the context still has a configured byte ceiling and each stateless turn must replay it.
 
-A production successor should use an official SDK, a documented stdin mode, or a local authenticated sidecar protocol if Google exposes one.
+A future successor could use an official SDK or local authenticated sidecar protocol if Google exposes one.
 
 ## Image input uses temporary prompt-media files
 

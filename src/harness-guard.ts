@@ -233,6 +233,6 @@ export function assertProviderHarnessIsToolless(
     `Forbidden AGY provider tool(s): ${names}. `
       + `Provider-mode agy unexpectedly used its own harness (${activitySummaryFromSteps(unexpectedTools, result.toolSteps.length, result.subagents.length)}). `
       + `The installed ${agentName} definition is stale, inherited AGY customizations, or the model misrouted an OMP request to an AGY control tool. `
-      + "Run /agy-install-agent (or npm run install-agent -- --force), fully restart OMP, and retry.",
+      + "Run /agy-install-agent (or sfw-npm run install-agent -- --force), fully restart OMP, and retry.",
   );
 }

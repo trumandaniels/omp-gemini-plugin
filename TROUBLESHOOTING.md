@@ -12,7 +12,7 @@ omp plugin doctor
 For a one-off diagnosis:
 
 ```bash
-omp --extension /absolute/path/to/omp-agy-native-bridge
+omp --extension /absolute/path/to/checkout
 ```
 
 The package manifest must contain:
@@ -126,7 +126,6 @@ Repair from the repository root:
 ```bash
 git switch main
 git pull
-cd omp-agy-native-bridge
 sfw-npm run install-agent -- --force
 sfw-npm run doctor:live
 ```
@@ -165,15 +164,14 @@ Current provider mode recognizes only the exact, side-effect-free form of this f
 
 The failed message result is never inserted into OMP history. Token usage from the discarded attempt is still counted. There is one shared retry budget, so one OMP provider turn can launch at most two AGY processes.
 
-Update both prompt layers before retesting:
+Update the installed bridge agent and provider hook before retesting.
 
 ```bash
 git switch main
 git pull
-cd omp-agy-native-bridge
-npm run install-agent -- --force
+sfw-npm run install-agent -- --force
 omp plugin install "$PWD"
-npm run doctor:live
+sfw-npm run doctor:live
 ```
 
 Then fully terminate every OMP and AGY process and restart OMP. A native OMP coordination tool named `hub` remains available when it appears in the OMP tool catalog; the fix blocks only Antigravity messaging and coordination tools from being invoked inside provider mode.
@@ -260,7 +258,7 @@ Check, in order:
 6. The custom agent was reinstalled after upgrading this bridge:
 
    ```bash
-   npm run install-agent -- --force
+   sfw-npm run install-agent -- --force
    ```
 
 Run an isolated AGY test in a disposable directory with a small image:
@@ -275,16 +273,14 @@ A force-killed process or host crash can leave an `omp-agy-media-*` directory un
 
 ## Prompt exceeds `AGY_BRIDGE_MAX_PROMPT_BYTES`
 
-Provider mode sends the reconstructed OMP context through the `-p` process argument. Solutions, in order:
+Provider mode sends the reconstructed OMP context through the official CLI's non-TTY stdin prompt. The bridge still rejects contexts above `AGY_BRIDGE_MAX_PROMPT_BYTES`. Solutions, in order:
 
 1. compact the OMP session;
 2. start a new OMP session with a concise handoff;
 3. reduce verbose tool output;
-4. raise the limit on Linux/WSL after checking `getconf ARG_MAX`;
+4. raise the limit after checking available memory and the installed CLI behavior;
 5. use `agy_delegate` for one self-contained task;
-6. implement the future SDK/IPC transport described in the implementation plan.
-
-Do not raise the Windows default blindly; Windows process command lines are much smaller than Linux `ARG_MAX`.
+6. use a future SDK or local authenticated sidecar transport if the official CLI exposes one.
 
 ## No token-by-token text appears
 
@@ -366,8 +362,8 @@ A production implementation should use a platform-specific process-group kill an
 Install development peers:
 
 ```bash
-npm install
-npm run typecheck
+sfw-npm install
+sfw-npm run typecheck
 ```
 
 OMP runtime may still load the extension through host package compatibility even when this extracted development directory has no local peer installation. Typecheck should be run in a real implementation repository before publishing.

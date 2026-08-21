@@ -30,7 +30,7 @@
     "test": "tsx --test ./test/*.test.ts",
     "check:source": "node ./scripts/check.mjs",
     "check:package": "node ./scripts/check-package.mjs",
-    "check": "npm run check:source && npm test && npm run check:package",
+    "check": "sfw-npm run check:source && sfw-npm test && sfw-npm run check:package",
     "typecheck": "tsc --noEmit"
   },
   "files": [
@@ -40,12 +40,9 @@
     "examples",
     "docs",
     "README.md",
-    "IMPLEMENTATION_INSTRUCTIONS.md",
-    "GPT_SPARK_EXECUTION_PROMPT.md",
     "ARCHITECTURE.md",
     "SECURITY.md",
     "TROUBLESHOOTING.md",
-    "VALIDATION.md",
     "LICENSE"
   ]
 }

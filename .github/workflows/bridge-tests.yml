@@ -3,13 +3,11 @@ name: OMP bridge compatibility
 on:
   pull_request:
     paths:
-      - "omp-agy-native-bridge/**"
-      - ".github/workflows/bridge-tests.yml"
+      - "**"
   push:
     branches: [main]
     paths:
-      - "omp-agy-native-bridge/**"
-      - ".github/workflows/bridge-tests.yml"
+      - "**"
   workflow_dispatch:
 
 permissions:
@@ -23,21 +21,34 @@ jobs:
       fail-fast: false
       matrix:
         omp-version: ["17.2.12", "latest"]
-    defaults:
-      run:
-        working-directory: omp-agy-native-bridge
     steps:
       - uses: actions/checkout@v4
+
+      - uses: SocketDev/action@2d3f25590c6ed6ba11a9a14c064d962a3a04698f # v1.3.1
+        with:
+          mode: firewall-free
+          shims: "false"
+
+      - name: Configure Socket Firewall npm wrapper
+        run: |
+          cat > "$RUNNER_TEMP/sfw-npm" <<'EOF'
+          #!/bin/sh
+          set -eu
+          cutoff=$(date -u -d '7 days ago' '+%Y-%m-%dT%H:%M:%SZ')
+          exec sfw npm --before "$cutoff" "$@"
+          EOF
+          chmod +x "$RUNNER_TEMP/sfw-npm"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: omp-agy-native-bridge/package.json
+          cache-dependency-path: package-lock.json
 
       - name: Install bridge dependencies and OMP peers
         run: >-
-          npm install --no-audit --no-fund --no-save
+          sfw-npm install --no-audit --no-fund --no-save
           @oh-my-pi/pi-ai@${{ matrix.omp-version }}
           @oh-my-pi/pi-coding-agent@${{ matrix.omp-version }}
 
@@ -53,13 +64,13 @@ jobs:
           NODE
 
       - name: Syntax-check every TypeScript source
-        run: npm run check:source
+        run: sfw-npm run check:source
 
       - name: Run unit and fake-process tests
-        run: npm test
+        run: sfw-npm test
 
       - name: Typecheck against OMP ${{ matrix.omp-version }}
-        run: npm run typecheck
+        run: sfw-npm run typecheck
 
       - name: Verify distributable package contents
-        run: npm run check:package
+        run: sfw-npm run check:package

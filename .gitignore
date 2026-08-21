@@ -214,4 +214,9 @@ __marimo__/
 
 # Windows downloaded-file metadata and local OMP package snapshots
 *:Zone.Identifier
-omp-agy-native-bridge/.tmp-pi/
+
+# Node/OMP bridge workspace files
+node_modules/
+.omp/agy-bridge.json
+coverage/
+.tmp-pi/
