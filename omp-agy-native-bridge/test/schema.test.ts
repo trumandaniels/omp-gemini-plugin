@@ -85,6 +85,45 @@ test("parseAgyTerminalOutput parses JSON response when structured_output is abse
   assert.equal(parsed.tool_calls.length, 0);
 });
 
+test("parseAgyTerminalOutput treats a bare protocol request as a host action", () => {
+  assert.deepEqual(
+    parseAgyTerminalOutput(
+      {
+        response: JSON.stringify({
+          request_id: "next-read",
+          action_id: "host_action_02",
+          input: { path: "src/editor/Editor.tsx:880-1142" },
+        }),
+      },
+      ["host_action_01", "host_action_02"],
+    ),
+    {
+      text: "",
+      tool_calls: [
+        {
+          id: "next-read",
+          name: "host_action_02",
+          arguments: { path: "src/editor/Editor.tsx:880-1142" },
+        },
+      ],
+      finish_reason: "tool_use",
+    },
+  );
+});
+
+test("parseAgyTerminalOutput preserves ordinary JSON arrays containing non-request objects", () => {
+  const value = [
+    { action_id: "display-only", input: { value: 1 } },
+    { label: "not a host request" },
+  ];
+
+  assert.deepEqual(parseAgyTerminalOutput({ response: JSON.stringify(value) }, ["host_action_01"]), {
+    text: JSON.stringify(value, null, 2),
+    tool_calls: [],
+    finish_reason: "stop",
+  });
+});
+
 test("parseAgyTerminalOutput keeps the first result when agy concatenates completion objects", () => {
   const response = [
     { response: "Test acknowledged. Ready for instructions.", host_requests: [] },

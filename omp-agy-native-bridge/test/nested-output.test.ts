@@ -38,6 +38,58 @@ test("unwrapNestedBridgeOutput recovers fenced host requests serialized inside r
   );
 });
 
+test("unwrapNestedBridgeOutput recovers a bare host request serialized inside response", () => {
+  const nested = JSON.stringify({
+    action_id: "host_action_02",
+    input: {
+      i: "Reading remaining component lines",
+      path: "src/editor/Editor.tsx:880-1142",
+    },
+  });
+
+  assert.deepEqual(
+    unwrapNestedBridgeOutput(
+      { text: nested, tool_calls: [], finish_reason: "stop" },
+      ["host_action_01", "host_action_02"],
+    ),
+    {
+      text: "",
+      tool_calls: [
+        {
+          name: "host_action_02",
+          arguments: {
+            i: "Reading remaining component lines",
+            path: "src/editor/Editor.tsx:880-1142",
+          },
+        },
+      ],
+      finish_reason: "tool_use",
+    },
+  );
+});
+
+test("unwrapNestedBridgeOutput recovers a bare batch of host requests", () => {
+  const nested = JSON.stringify([
+    { action_id: "glob", input: { path: "src/**" } },
+    { action_id: "read", input: { path: "README.md" } },
+  ]);
+
+  assert.deepEqual(
+    unwrapNestedBridgeOutput(
+      { text: nested, tool_calls: [], finish_reason: "stop" },
+      ["glob", "read"],
+    ),
+    {
+      text: "",
+      tool_calls: [
+        { name: "glob", arguments: { path: "src/**" } },
+        { name: "read", arguments: { path: "README.md" } },
+      ],
+      finish_reason: "tool_use",
+    },
+  );
+});
+
 test("unwrapNestedBridgeOutput recursively unwraps a double-encoded host response", () => {
   const innermost = JSON.stringify({
     response: "Recovered answer.",

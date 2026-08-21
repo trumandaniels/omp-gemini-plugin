@@ -6,14 +6,19 @@ const MAX_NESTED_BRIDGE_DEPTH = 4;
 /**
  * Nested-output recovery is intentionally more conservative than the top-level
  * structured-output parser. Plain JSON is valid user-visible content, so only
- * unwrap text that carries host-response protocol keys. This preserves exact
- * JSON answers while recovering a serialized response emitted by AGY wrappers.
+ * unwrap text that carries host-response protocol keys. A bare `action_id`
+ * object is also protocol-shaped: AGY occasionally serializes the requested
+ * action directly into `response` instead of wrapping it in `host_requests`.
+ * The parser still validates its neutral action ID and input before execution.
+ * This preserves ordinary JSON answers while recovering serialized provider
+ * responses emitted by AGY wrappers.
  */
 function looksLikeSerializedBridgeOutput(value: string): boolean {
   const trimmed = value.trimStart();
-  const startsLikeJson = trimmed.startsWith("{") || /^(?:```|~~~)(?:json)?(?:\s|$)/i.test(trimmed);
+  const startsLikeJson = trimmed.startsWith("{") || trimmed.startsWith("[")
+    || /^(?:```|~~~)(?:json)?(?:\s|$)/i.test(trimmed);
   if (!startsLikeJson) return false;
-  return /"(?:host_requests|response)"\s*:/.test(trimmed);
+  return /"(?:host_requests|response|action_id)"\s*:/.test(trimmed);
 }
 
 function sameBridgeOutput(left: BridgeStructuredOutput, right: BridgeStructuredOutput): boolean {

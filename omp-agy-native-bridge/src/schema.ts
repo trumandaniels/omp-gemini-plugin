@@ -210,6 +210,19 @@ function isHostResponseEnvelope(value: unknown): value is Record<string, unknown
   return value.host_requests === undefined || value.host_requests === null || Array.isArray(value.host_requests);
 }
 
+function isBareHostRequest(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const hasResponse = Object.prototype.hasOwnProperty.call(value, "response");
+  const hasRequests = Object.prototype.hasOwnProperty.call(value, "host_requests");
+  return !hasResponse && !hasRequests && typeof value.action_id === "string";
+}
+
+function bareHostRequests(value: unknown): Record<string, unknown>[] | undefined {
+  if (isBareHostRequest(value)) return [value];
+  if (Array.isArray(value) && value.length > 0 && value.every(isBareHostRequest)) return value;
+  return undefined;
+}
+
 function parseHostResponseOutputInternal(
   value: unknown,
   allowedActionIds: readonly string[],
@@ -220,8 +233,10 @@ function parseHostResponseOutputInternal(
   }
   if (Array.isArray(value)) {
     const first = value.find(isHostResponseEnvelope);
-    return first
-      ? parseHostResponseOutputInternal(first, allowedActionIds, depth + 1)
+    if (first) return parseHostResponseOutputInternal(first, allowedActionIds, depth + 1);
+    const requests = bareHostRequests(value);
+    return requests
+      ? parseHostResponseOutputInternal({ response: "", host_requests: requests }, allowedActionIds, depth + 1)
       : plainJsonAnswer(value);
   }
   if (!isRecord(value)) {
@@ -229,14 +244,21 @@ function parseHostResponseOutputInternal(
     return plainJsonAnswer(value);
   }
 
+  const nestedRequests = bareHostRequests(value.response);
   const nestedResponse = isHostResponseEnvelope(value.response)
     ? value.response
-    : Array.isArray(value.response)
-      ? value.response.find(isHostResponseEnvelope)
-      : undefined;
+    : nestedRequests
+      ? { response: "", host_requests: nestedRequests }
+      : Array.isArray(value.response)
+        ? value.response.find(isHostResponseEnvelope)
+        : undefined;
   const outerRequests = hostRequestsOrEmpty(value.host_requests);
   if (nestedResponse && outerRequests?.length === 0) {
     return parseHostResponseOutputInternal(nestedResponse, allowedActionIds, depth + 1);
+  }
+  const requests = bareHostRequests(value);
+  if (requests) {
+    return parseHostResponseOutputInternal({ response: "", host_requests: requests }, allowedActionIds, depth + 1);
   }
   if (!isHostResponseEnvelope(value)) return plainJsonAnswer(value);
 
