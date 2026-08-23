@@ -36,6 +36,15 @@ The previous attempt was discarded because it left provider-only response mode a
 - For an informational question, answer directly without selecting any internal Antigravity action.`;
 }
 
+export function appendProviderProgressRetryInstruction(prompt: string): string {
+  return `${prompt}\n\n# Mandatory continuation correction
+The previous attempt was discarded because it returned only progress narration. A response without a host request ends the OMP loop.
+- Do not repeat, paraphrase, or rely on the discarded progress message.
+- If actionable work remains, keep "response" empty and return the next necessary action in "host_requests" now.
+- Return a non-empty "response" with no host requests only when it is the complete final answer to the user's request.
+- Do not announce what you will inspect, search, read, edit, run, or verify. Request that host action in the same terminal JSON object instead.`;
+}
+
 export function appendMissingAgyRecipientRetryInstruction(prompt: string, recipient: string): string {
   const recipientName = JSON.stringify(recipient);
   return `${prompt}\n\n# Mandatory provider routing correction

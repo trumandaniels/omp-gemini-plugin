@@ -12,6 +12,7 @@ import { synthesizeMissingRecipientRecovery } from "./missing-recipient-recovery
 import {
   appendMissingAgyRecipientRetryInstruction,
   appendProviderHarnessRetryInstruction,
+  appendProviderProgressRetryInstruction,
 } from "./prompt.ts";
 import type { SerializedTool } from "./schema.ts";
 import type { AgyRunResult, AgyStepUpdateEvent, AgyUsage } from "./types.ts";
@@ -21,6 +22,15 @@ const PERMISSION_CONVERSION_FAILURE = /^declaring permissions:\s*cortex tool\s+(
 const INVALID_TASK_ID_FAILURE = /^invalid task ID format:\s*"([^"\r\n]+)"\.?$/i;
 const UNKNOWN_TOOL_FAILURE =
   /^unknown tool:\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`|([a-zA-Z0-9_.-]+))(?:\s*-\s*check spelling)?\.?$/i;
+const INVALID_PROVIDER_ACTION_ARGUMENTS = /^invalid arguments:\s*-\s*missing properties\s+(.+)$/is;
+const PROGRESS_NARRATION =
+  /^let(?:'|’)s\s+(?:check|inspect|search|read|look|review|run|open|examine|find|verify|continue|update|edit|implement|create|add|fix|test)\b/i;
+const REQUIRED_PROVIDER_ACTION_PROPERTIES: Readonly<Record<string, true>> = {
+  action: true,
+  toolsummary: true,
+  toolaction: true,
+};
+const MAX_PROVIDER_PROGRESS_RECOVERIES = 2;
 const MAX_PROVIDER_TRANSPORT_RECOVERIES = 3;
 const PROVIDER_BOUNDARY_DENIAL = new RegExp(
   `^tool call denied by pre-tool hook:\\s*${PROVIDER_TOOL_BLOCK_MARKER}:`,
@@ -70,6 +80,24 @@ function recordDiscardedUsage(error: unknown, discardedUsage: AgyUsage[]): void 
   if (error instanceof AgyRunError && error.terminal?.usage) {
     discardedUsage.push(error.terminal.usage);
   }
+}
+
+function isProgressOnlyProviderResult(
+  result: AgyRunResult,
+  aliases: Readonly<Record<string, string>> | undefined,
+): boolean {
+  if (!aliases || Object.keys(aliases).length === 0) return false;
+  const structured = result.terminal.structured_output;
+  if (!isRecord(structured)) return false;
+  const requests = structured.host_requests ?? structured.tool_calls;
+  if (requests !== undefined && requests !== null && (!Array.isArray(requests) || requests.length > 0)) return false;
+  const response = structured.response ?? structured.text;
+  if (typeof response !== "string") return false;
+  const text = response.trim();
+  return text.length > 0
+    && text.length <= 400
+    && !text.includes("\n")
+    && PROGRESS_NARRATION.test(text);
 }
 
 function appendFinalMissingRecipientCorrection(
@@ -181,6 +209,34 @@ export function retryablePermissionConversionTool(
   if (error.subagents.length > 0) return undefined;
   if (unexpectedProviderHarnessToolSteps(error.toolSteps, options).length > 0) return undefined;
   return toolName;
+}
+
+/**
+ * AGY validates some provider-native action envelopes before emitting a tool
+ * lifecycle event. Recover only its exact missing-action-metadata diagnostic;
+ * broader invalid-argument errors may belong to OMP host actions.
+ */
+export function retryableInvalidProviderActionArguments(
+  error: unknown,
+  options: ProviderHarnessGuardOptions = {},
+): boolean {
+  if (!(error instanceof AgyRunError) || error.terminal?.status !== "ERROR") return false;
+  const terminalError = error.terminal.error;
+  if (typeof terminalError !== "string") return false;
+  const match = INVALID_PROVIDER_ACTION_ARGUMENTS.exec(terminalError.trim());
+  if (!match) return false;
+  const properties = [...match[1].matchAll(/'([^']+)'/g)]
+    .map((candidate) => normalizedToken(candidate[1]));
+  if (
+    properties.length !== 3
+    || properties.some((property) => !REQUIRED_PROVIDER_ACTION_PROPERTIES[property])
+    || Object.keys(REQUIRED_PROVIDER_ACTION_PROPERTIES)
+      .some((required) => !properties.includes(required))
+  ) {
+    return false;
+  }
+  if (!providerHarnessSnapshotsComplete(error) || error.subagents.length > 0) return false;
+  return unexpectedProviderHarnessToolSteps(error.toolSteps, options).length === 0;
 }
 
 /**
@@ -326,10 +382,10 @@ function encodeSyntheticHostResponse(
 /**
  * Run AGY with tightly bounded provider-mode recovery budgets.
  *
- * Every AGY invocation passes through the same pre-execution transport recovery
- * wrapper. Up to three proven side-effect-free permission, boundary-hook, or
- * invalid-task-ID failures are discarded across the whole OMP turn; a fourth is
- * surfaced rather than risking an unbounded model loop.
+ * Every AGY invocation passes through the same bounded recovery wrapper. It
+ * discards proven side-effect-free transport failures and response-only progress
+ * narration. Exhausted recovery budgets surface an error instead of ending the
+ * OMP loop with incomplete work.
  *
  * When a failed AGY send is unambiguous, prefer deterministic transport recovery
  * over another model call. Provider aliases are mapped to canonical OMP names for
@@ -340,6 +396,7 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
   const discardedUsage: AgyUsage[] = [];
   let attempts = 0;
   let providerTransportRecoveries = 0;
+  let providerProgressRecoveries = 0;
   const guardOptions = options.guardOptions ?? {};
 
   const invoke = async (prompt: string): Promise<AgyRunResult> => {
@@ -351,11 +408,19 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
     let currentPrompt = prompt;
     while (true) {
       try {
-        return await invoke(currentPrompt);
+        const result = await invoke(currentPrompt);
+        if (!isProgressOnlyProviderResult(result, options.recipientAliases)) return result;
+        if (providerProgressRecoveries >= MAX_PROVIDER_PROGRESS_RECOVERIES) {
+          throw new Error("agy repeatedly returned progress narration without the next required host action");
+        }
+        if (result.terminal.usage) discardedUsage.push(result.terminal.usage);
+        providerProgressRecoveries += 1;
+        currentPrompt = appendProviderProgressRetryInstruction(prompt);
       } catch (error) {
         const permissionTool = retryablePermissionConversionTool(error, guardOptions);
         const invalidTaskId = retryableInvalidTaskId(error, guardOptions);
         const providerBoundaryDenied = retryableProviderBoundaryDenial(error, guardOptions);
+        const invalidProviderActionArguments = retryableInvalidProviderActionArguments(error, guardOptions);
         const unknownProviderCapability = retryableUnknownProviderCapability(
           error,
           options.recipientAliases,
@@ -369,7 +434,13 @@ export async function runProviderAttempts(options: ProviderAttemptOptions): Prom
             return synthesized;
           }
         }
-        if (!permissionTool && !invalidTaskId && !providerBoundaryDenied && !unknownProviderCapability) {
+        if (
+          !permissionTool
+          && !invalidTaskId
+          && !invalidProviderActionArguments
+          && !providerBoundaryDenied
+          && !unknownProviderCapability
+        ) {
           throw error;
         }
         if (providerTransportRecoveries >= MAX_PROVIDER_TRANSPORT_RECOVERIES) throw error;

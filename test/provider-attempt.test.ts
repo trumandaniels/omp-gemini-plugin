@@ -88,6 +88,66 @@ function successfulResult(toolSteps: AgyStepUpdateEvent[] = []): AgyRunResult {
   };
 }
 
+function progressResult(text: string): AgyRunResult {
+  const result = successfulResult();
+  result.terminal.response = JSON.stringify({ response: text, host_requests: [] });
+  result.terminal.structured_output = { response: text, host_requests: [] };
+  return result;
+}
+
+test("runProviderAttempts replaces response-only progress with the next host action", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Inspect the project and implement the feature",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    recipientAliases: { host_action_01: "read" },
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) {
+        return progressResult("Let's inspect the files to understand the project structure and styling.");
+      }
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /previous attempt was discarded because it returned only progress narration/i);
+  assert.match(prompts[1] ?? "", /return the next necessary action in "host_requests" now/i);
+});
+
+test("runProviderAttempts fails instead of ending after repeated progress narration", async () => {
+  let calls = 0;
+  await assert.rejects(
+    runProviderAttempts({
+      initialPrompt: "Inspect the project",
+      enforceToolless: true,
+      agentName: "omp-bridge-model",
+      recipientAliases: { host_action_01: "read" },
+      invoke: async () => {
+        calls += 1;
+        return progressResult("Let's check if there are any commits or docs mentioning the feature.");
+      },
+    }),
+    /repeatedly returned progress narration/,
+  );
+  assert.equal(calls, 3);
+});
+
+test("runProviderAttempts preserves response-only final answers", async () => {
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Answer directly",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    recipientAliases: { host_action_01: "read" },
+    invoke: async () => progressResult("The implementation is complete."),
+  });
+
+  assert.equal(outcome.attempts, 1);
+  assert.equal(outcome.discardedUsage.length, 0);
+});
+
 test("runProviderAttempts recovers the exact missing OMP recipient failure once", async () => {
   const outcome = await runProviderAttempts({
     initialPrompt: "FAKE:MISSING_OMP_RECIPIENT",

@@ -5,6 +5,7 @@ import test from "node:test";
 import { AgyRunError, type AgyRunErrorDetails } from "../src/agy/runner.ts";
 import {
   retryableInvalidTaskId,
+  retryableInvalidProviderActionArguments,
   retryablePermissionConversionTool,
   retryableProviderBoundaryDenial,
   retryableUnknownProviderCapability,
@@ -19,6 +20,8 @@ const MANAGE_TASK_DIAGNOSTIC =
   "declaring permissions: cortex tool manage_task: convert tool call for permissions: model output error: invalid tool call error (invalid_args) malformed task request";
 const PROVIDER_BOUNDARY_DIAGNOSTIC =
   `tool call denied by pre-tool hook: ${PROVIDER_TOOL_BLOCK_MARKER}: Provider mode forbids Antigravity-native actions.`;
+const INVALID_PROVIDER_ACTION_ARGUMENTS_DIAGNOSTIC =
+  "invalid arguments:\n- missing properties 'Action', 'toolSummary', 'toolAction'";
 
 function permissionConversionError(
   diagnostic = SCHEDULE_DIAGNOSTIC,
@@ -59,6 +62,13 @@ function invalidTaskIdError(
     subagentCount: 0,
     ...overrides,
   });
+}
+
+function invalidProviderActionArgumentsError(
+  diagnostic = INVALID_PROVIDER_ACTION_ARGUMENTS_DIAGNOSTIC,
+  overrides: Partial<AgyRunErrorDetails> = {},
+): AgyRunError {
+  return permissionConversionError(diagnostic, overrides);
 }
 
 function unknownToolError(
@@ -144,6 +154,41 @@ test("runProviderAttempts retries an unknown host action ID as structured output
   assert.equal(outcome.discardedUsage.length, 1);
   assert.match(prompts[1] ?? "", /Mandatory provider retry correction/);
   assert.doesNotMatch(prompts[1] ?? "", /host_action_02/);
+});
+
+test("classifies exact missing provider action metadata as pre-execution failure", () => {
+  assert.equal(retryableInvalidProviderActionArguments(invalidProviderActionArgumentsError()), true);
+  assert.equal(
+    retryableInvalidProviderActionArguments(
+      invalidProviderActionArgumentsError("invalid arguments:\n- missing properties 'Action', 'toolSummary'"),
+    ),
+    false,
+  );
+  assert.equal(
+    retryableInvalidProviderActionArguments(
+      invalidProviderActionArgumentsError(INVALID_PROVIDER_ACTION_ARGUMENTS_DIAGNOSTIC, { toolStepCount: 1 }),
+    ),
+    false,
+  );
+});
+
+test("runProviderAttempts retries missing provider action metadata", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "ORIGINAL",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) throw invalidProviderActionArgumentsError();
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+  assert.match(prompts[1] ?? "", /Mandatory provider retry correction/);
+  assert.doesNotMatch(prompts[1] ?? "", /Action|toolSummary|toolAction/);
 });
 
 test("classifies exact provider-hook denials as safe pre-execution failures", () => {
