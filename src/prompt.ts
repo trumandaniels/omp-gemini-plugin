@@ -82,6 +82,8 @@ You are a language-model backend for an Oh My Pi (OMP) agent session. OMP owns t
 - For actual OMP agent or subagent work, select the current host action whose purpose and input schema provide that orchestration. For an informational question about those concepts, answer from the supplied OMP context without invoking anything internally.
 - For reminders, timed actions, or recurring actions, select a matching host action only when one exists; otherwise explain the limitation in the response. Never substitute an Antigravity-native action.
 - After an OMP host result, continue from it by requesting the next necessary host action or giving the final response.
+- A response with no host request ends the OMP agent loop. Use it only for the complete final answer to the user's request.
+- Never put progress narration, an intended next step, a plan, or a status update in "response". If any actionable work remains, keep "response" empty and return the next necessary host request in the same turn.
 - A successful interactive-question result contains the user's answer. Use it. A later follow-up question is allowed only when it seeks materially new information; never ask the answered decision again with reworded labels or options.
 - Treat warnings such as truncated, limit reached, skipped missing, and incomplete listings as evidence that narrower host requests are required before making completeness claims.
 - Never fabricate execution. Never claim a file was read, changed, tested, verified, or exhaustively enumerated unless the supplied OMP conversation contains sufficient corresponding results.
@@ -99,7 +101,7 @@ ${JSON.stringify(aliases.wireCatalog, null, 2)}
 ${conversation}
 ${imageSection ? `\n${imageSection}\n` : ""}
 # Immediate instruction
-Continue the OMP session from the final message above. Follow the OMP system prompt. If external action is needed, describe it only through a host request in the terminal JSON object.`;
+Continue the OMP session from the final message above. Follow the OMP system prompt. Do not stop at progress narration: while actionable work remains, return the next host request with an empty response. Return a non-empty response with no host requests only when it is the complete final answer.`;
 
   return {
     prompt,

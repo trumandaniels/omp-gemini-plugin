@@ -165,6 +165,27 @@ test("provider prompt continues from incomplete OMP results instead of claiming 
   assert.match(result.prompt, /truncated: limit 200 results/);
 });
 
+test("provider prompt cannot end the loop with progress narration", () => {
+  const result = buildProviderPrompt(
+    {
+      messages: [{ role: "user", content: "Inspect and update the project", timestamp: 1 }],
+      tools: [
+        {
+          name: "read",
+          description: "Read a file through OMP",
+          parameters: { type: "object", properties: { path: { type: "string" } } },
+        },
+      ],
+    },
+    DEFAULT_CONFIG,
+  );
+
+  assert.match(result.prompt, /response with no host request ends the OMP agent loop/i);
+  assert.match(result.prompt, /Never put progress narration, an intended next step, a plan, or a status update in "response"/);
+  assert.match(result.prompt, /while actionable work remains, return the next host request with an empty response/i);
+  assert.match(result.prompt, /only when it is the complete final answer/i);
+});
+
 test("permission-recovery prompt does not echo the offending AGY tool names", () => {
   const corrected = appendProviderHarnessRetryInstruction(
     "ORIGINAL PROMPT",

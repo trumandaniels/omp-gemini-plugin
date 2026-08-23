@@ -65,3 +65,11 @@ test("bundled provider agent continues from incomplete OMP results", async () =>
   assert.match(source, /request a narrower host action instead of treating it as complete/);
   assert.match(source, /Never claim exhaustive discovery from incomplete results/);
 });
+
+test("bundled provider agent cannot end the loop with progress narration", async () => {
+  const source = await readFile(agentPath, "utf8");
+  assert.match(source, /response with no host request ends the OMP agent loop/i);
+  assert.match(source, /Never return progress narration, an intended next step, a plan, or a status update/);
+  assert.match(source, /If any actionable work remains, keep the response empty and return the next necessary host request/);
+  assert.match(source, /only for the complete final answer/i);
+});
