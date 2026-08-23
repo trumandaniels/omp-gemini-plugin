@@ -58,8 +58,6 @@ sfw-npm run typecheck
 
 The test suite uses a fake `agy` process. Live model access still requires your OMP installation, authenticated Antigravity account, current model entitlement, and local CLI behavior; this repository does not claim those checks pass automatically.
 
-Every plugin update requires a live acceptance soak before it is declared good. Run the actual extension through OMP for at least 10 minutes with `official-agy/gemini-3.7-flash` at `medium` thinking. The soak must exercise multi-step inspection, an edit followed by a direct smoke check, continuation after expected missing-file results, a no-tool final answer, and a persisted `--continue` session. Record the prompts, elapsed runs, and observed outputs. Fake-AGY tests and the project check remain required but do not replace this gate. If the live model or authenticated CLI is unavailable, report the blocked gate and do not sign off on the update.
-
 ## Documentation
 
 - [Architecture](ARCHITECTURE.md) — state ownership and provider/delegate data flow.

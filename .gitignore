@@ -220,3 +220,4 @@ node_modules/
 .omp/agy-bridge.json
 coverage/
 .tmp-pi/
+AGENTS.md
