@@ -38,6 +38,25 @@ test("unwrapNestedBridgeOutput recovers fenced host requests serialized inside r
   );
 });
 
+test("unwrapNestedBridgeOutput recovers fenced responses with escaped Markdown backticks", () => {
+  const answer = "Observed `formatCount` returning `${count} items`.";
+  const first = JSON.stringify({ response: answer, host_requests: [] }).replaceAll("`", "\\`");
+  const chatter = JSON.stringify({ response: "Task complete.", host_requests: [] });
+  const leaked = `\`\`\`json\n${first}\n\`\`\`\n\`\`\`json\n${chatter}\n\`\`\``;
+
+  assert.deepEqual(
+    unwrapNestedBridgeOutput(
+      { text: leaked, tool_calls: [], finish_reason: "stop" },
+      [],
+    ),
+    {
+      text: answer,
+      tool_calls: [],
+      finish_reason: "stop",
+    },
+  );
+});
+
 test("unwrapNestedBridgeOutput recovers a bare host request serialized inside response", () => {
   const nested = JSON.stringify({
     action_id: "host_action_02",

@@ -165,10 +165,18 @@ function firstJsonObject(value: string): unknown | undefined {
     if (char === "}" || char === "]") {
       if (expectedClosers.pop() !== char) return undefined;
       if (expectedClosers.length === 0) {
+        const candidate = normalized.slice(0, index + 1);
         try {
-          return JSON.parse(normalized.slice(0, index + 1));
+          return JSON.parse(candidate);
         } catch {
-          return undefined;
+          // AGY sometimes escapes Markdown backticks inside an otherwise valid
+          // JSON response string. Backticks are not a JSON escape sequence, so
+          // remove only that impossible escape and retry once.
+          try {
+            return JSON.parse(candidate.replace(/\\`/g, "`"));
+          } catch {
+            return undefined;
+          }
         }
       }
     }
@@ -176,6 +184,7 @@ function firstJsonObject(value: string): unknown | undefined {
 
   return undefined;
 }
+
 
 function parseSerializedBridgeOutput(
   value: string,
@@ -244,6 +253,7 @@ function parseHostResponseOutputInternal(
     return plainJsonAnswer(value);
   }
 
+  const outerRequests = hostRequestsOrEmpty(value.host_requests);
   const nestedRequests = bareHostRequests(value.response);
   const nestedResponse = isHostResponseEnvelope(value.response)
     ? value.response
@@ -252,7 +262,6 @@ function parseHostResponseOutputInternal(
       : Array.isArray(value.response)
         ? value.response.find(isHostResponseEnvelope)
         : undefined;
-  const outerRequests = hostRequestsOrEmpty(value.host_requests);
   if (nestedResponse && outerRequests?.length === 0) {
     return parseHostResponseOutputInternal(nestedResponse, allowedActionIds, depth + 1);
   }
