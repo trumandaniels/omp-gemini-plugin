@@ -117,6 +117,26 @@ test("runProviderAttempts replaces response-only progress with the next host act
   assert.match(prompts[1] ?? "", /return the next necessary action in "host_requests" now/i);
 });
 
+test("runProviderAttempts replaces imperative response-only progress with the next host action", async () => {
+  const prompts: string[] = [];
+  const outcome = await runProviderAttempts({
+    initialPrompt: "Make the extension work on Indeed",
+    enforceToolless: true,
+    agentName: "omp-bridge-model",
+    recipientAliases: { host_action_01: "read" },
+    invoke: async (prompt) => {
+      prompts.push(prompt);
+      if (prompts.length === 1) {
+        return progressResult("Check job-board-dom.js and manifest.json for board definitions");
+      }
+      return successfulResult();
+    },
+  });
+
+  assert.equal(outcome.attempts, 2);
+  assert.equal(outcome.discardedUsage.length, 1);
+});
+
 test("runProviderAttempts fails instead of ending after repeated progress narration", async () => {
   let calls = 0;
   await assert.rejects(

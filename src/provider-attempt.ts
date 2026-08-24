@@ -24,7 +24,7 @@ const UNKNOWN_TOOL_FAILURE =
   /^unknown tool:\s*(?:"([^"]+)"|'([^']+)'|`([^`]+)`|([a-zA-Z0-9_.-]+))(?:\s*-\s*check spelling)?\.?$/i;
 const INVALID_PROVIDER_ACTION_ARGUMENTS = /^invalid arguments:\s*-\s*missing properties\s+(.+)$/is;
 const PROGRESS_NARRATION =
-  /^let(?:'|’)s\s+(?:check|inspect|search|read|look|review|run|open|examine|find|verify|continue|update|edit|implement|create|add|fix|test)\b/i;
+  /^(?:(?:let(?:'|’)s|i(?:'|’)ll|i\s+will)\s+)?(?:check|inspect|search|read|look|review|run|open|examine|find|verify|continue|update|edit|implement|create|add|fix|test)\b/i;
 const REQUIRED_PROVIDER_ACTION_PROPERTIES: Readonly<Record<string, true>> = {
   action: true,
   toolsummary: true,

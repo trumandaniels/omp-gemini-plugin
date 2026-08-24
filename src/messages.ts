@@ -100,6 +100,37 @@ function normalizeMessage(
   };
 }
 
+const EXACT_RECENT_HOST_RESULTS = 4;
+
+function encodedConversation(
+  systemPrompt: readonly string[],
+  messages: readonly Record<string, unknown>[],
+  compaction?: { compactedHostResults: number; omittedCharacters: number },
+): string {
+  return JSON.stringify(
+    {
+      systemPrompt,
+      messages,
+      ...(compaction ? { historyCompaction: compaction } : {}),
+    },
+    null,
+    2,
+  );
+}
+
+function compactHostResult(message: Record<string, unknown>): number {
+  const content = JSON.stringify(message.content ?? []);
+  message.content = [
+    {
+      type: "host_result_compacted",
+      omittedCharacters: content.length,
+      instruction:
+        "This older host result was removed to bound provider context. Request a fresh narrow host action if its exact content is needed.",
+    },
+  ];
+  return content.length;
+}
+
 export function serializeConversation(
   context: { systemPrompt?: readonly string[]; messages?: readonly unknown[] },
   config: Pick<BridgeConfig, "maxHistoryChars">,
@@ -108,19 +139,33 @@ export function serializeConversation(
   const images = new Map(
     attachments.map((attachment) => [imageKey(attachment.messageIndex, attachment.contentIndex), attachment]),
   );
-  const serialized = JSON.stringify(
-    {
-      systemPrompt: (context.systemPrompt ?? []).map(String),
-      messages: (context.messages ?? []).map((message, index) => normalizeMessage(message, index, images)),
-    },
-    null,
-    2,
-  );
+  const systemPrompt = (context.systemPrompt ?? []).map(String);
+  const messages = (context.messages ?? []).map((message, index) => normalizeMessage(message, index, images));
+  const original = encodedConversation(systemPrompt, messages);
+  if (original.length <= config.maxHistoryChars) return original;
 
-  if (serialized.length > config.maxHistoryChars) {
-    throw new Error(
-      `OMP history is ${serialized.length.toLocaleString()} characters, above maxHistoryChars=${config.maxHistoryChars.toLocaleString()}. Compact the OMP session instead of silently dropping canonical history.`,
-    );
+  const hostResultIndexes = messages
+    .map((message, index) => message.role === "host_result" ? index : -1)
+    .filter((index) => index >= 0);
+  const compactableIndexes = hostResultIndexes.slice(
+    0,
+    Math.max(0, hostResultIndexes.length - EXACT_RECENT_HOST_RESULTS),
+  );
+  let compactedHostResults = 0;
+  let omittedCharacters = 0;
+  let serialized = original;
+
+  for (const index of compactableIndexes) {
+    omittedCharacters += compactHostResult(messages[index]);
+    compactedHostResults += 1;
+    serialized = encodedConversation(systemPrompt, messages, {
+      compactedHostResults,
+      omittedCharacters,
+    });
+    if (serialized.length <= config.maxHistoryChars) return serialized;
   }
-  return serialized;
+
+  throw new Error(
+    `OMP history is ${serialized.length.toLocaleString()} characters after compacting ${compactedHostResults} older host results, above maxHistoryChars=${config.maxHistoryChars.toLocaleString()}. The system prompt, user messages, or four most recent host results require a narrower OMP action or explicit session compaction.`,
+  );
 }

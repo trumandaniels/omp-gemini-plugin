@@ -69,13 +69,49 @@ test("conversation serialization replaces image bytes with attachment placeholde
   assert.doesNotMatch(serialized, /PRIVATE-BASE64-DATA/);
 });
 
-test("conversation serialization fails rather than silently dropping canonical history", () => {
+test("conversation serialization compacts old host results and reports omitted context", () => {
+  const messages = Array.from({ length: 6 }, (_, index) => [
+    {
+      role: "assistant",
+      content: [{ type: "toolCall", id: `call-${index}`, name: "read", arguments: { path: `${index}.txt` } }],
+    },
+    {
+      role: "toolResult",
+      toolCallId: `call-${index}`,
+      toolName: "read",
+      content: [{ type: "text", text: `${index}:` + "x".repeat(300) }],
+    },
+  ]).flat();
+
+  const parsed = JSON.parse(
+    serializeConversation({ systemPrompt: [], messages }, { maxHistoryChars: 4_650 }),
+  );
+
+  assert.deepEqual(parsed.historyCompaction, {
+    compactedHostResults: 2,
+    omittedCharacters: 658,
+  });
+  assert.equal(parsed.messages[1].content[0].type, "host_result_compacted");
+  assert.equal(parsed.messages[3].content[0].type, "host_result_compacted");
+  assert.match(parsed.messages[5].content[0].text, /^2:x+$/);
+  assert.match(parsed.messages.at(-1).content[0].text, /^5:x+$/);
+});
+
+test("conversation serialization preserves four recent exact host results", () => {
   assert.throws(
     () =>
       serializeConversation(
-        { systemPrompt: [], messages: [{ role: "user", content: "x".repeat(1_000) }] },
+        {
+          systemPrompt: [],
+          messages: Array.from({ length: 4 }, (_, index) => ({
+            role: "toolResult",
+            toolCallId: `call-${index}`,
+            toolName: "read",
+            content: [{ type: "text", text: "x".repeat(1_000) }],
+          })),
+        },
         { maxHistoryChars: 100 },
       ),
-    /Compact the OMP session/,
+    /four most recent host results/,
   );
 });

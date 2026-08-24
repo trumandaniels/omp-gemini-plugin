@@ -28,7 +28,7 @@ export const DEFAULT_CONFIG: BridgeConfig = {
   // Provider prompts are written to the child's stdin, not argv, so the old
   // native-Windows command-line ceiling no longer applies to this payload.
   maxPromptBytes: 1_500_000,
-  maxHistoryChars: 900_000,
+  maxHistoryChars: 240_000,
   maxToolCatalogChars: 180_000,
   maxToolDescriptionChars: 4_000,
   maxToolSchemaChars: 24_000,
